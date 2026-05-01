@@ -1,4 +1,5 @@
 import type {
+  CodexDeleteResult,
   CodexStatusReport,
   CodexThreadStatus,
   DiagnosisReport,
@@ -6,62 +7,17 @@ import type {
   RepairPlan,
   RepairResult
 } from "./types.ts";
-
-type CursorStage = "scan" | "diagnose" | "preview" | "repair";
-type LogLevel = "info" | "success" | "warning" | "error";
-
-interface UiLog {
-  id: number;
-  time: string;
-  level: LogLevel;
-  message: string;
-}
-
-const cursors: Record<CursorStage, string> = {
-  scan: "Scan",
-  diagnose: "Diagnose",
-  preview: "Preview",
-  repair: "Repair"
-};
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function nowText(): string {
-  return new Date().toLocaleString("zh-CN", { hour12: false });
-}
-
-function formatTime(value: string | null): string {
-  if (!value) return "-";
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return value;
-  return dt.toLocaleString("zh-CN", { hour12: false });
-}
-
-function threadState(thread: CodexThreadStatus): { label: string; tone: "ok" | "warn" | "danger" } {
-  if (thread.status.includes("missing-db") || thread.status.includes("missing-jsonl")) {
-    return { label: "Data Missing", tone: "danger" };
-  }
-  if (thread.status.includes("need-sync")) return { label: "Needs Sync", tone: "warn" };
-  if (thread.status.includes("archived")) return { label: "Archived", tone: "warn" };
-  return { label: "Ready", tone: "ok" };
-}
-
-function cursorStepList(stage: CursorStage): Array<{ key: CursorStage; label: string; state: "done" | "current" | "pending" }> {
-  const order: CursorStage[] = ["scan", "diagnose", "preview", "repair"];
-  const idx = order.indexOf(stage);
-  return order.map((key, i) => ({
-    key,
-    label: cursors[key],
-    state: i < idx ? "done" : i === idx ? "current" : "pending"
-  }));
-}
+import { renderWorkbench } from "./ui/workbench-render.ts";
+import { normalizeText, nowText } from "./ui/workbench-utils.ts";
+import type {
+  CursorStage,
+  LogLevel,
+  SortDirection,
+  ThreadFilter,
+  ThreadSort,
+  UiLog,
+  WorkbenchViewState
+} from "./ui/workbench-types.ts";
 
 export class RestoreAppView {
   private readonly root: HTMLElement;
@@ -76,6 +32,11 @@ export class RestoreAppView {
   private codexStatus: CodexStatusReport | null = null;
   private selectedThreadIds = new Set<string>();
   private selectedBackupPath = "";
+  private activeThreadId = "";
+  private threadQuery = "";
+  private threadFilter: ThreadFilter = "all";
+  private threadSort: ThreadSort = "updated";
+  private sortDirection: SortDirection = "desc";
 
   private cursorCandidates: EnvironmentCandidate[] = [];
   private cursorCandidateId = "";
@@ -83,6 +44,7 @@ export class RestoreAppView {
   private cursorReport: DiagnosisReport | null = null;
   private cursorPlan: RepairPlan | null = null;
   private cursorResult: RepairResult | null = null;
+  private lastDeletePreview: CodexDeleteResult | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -91,16 +53,16 @@ export class RestoreAppView {
   async init(): Promise<void> {
     this.render();
     if (!window.restoreApp) {
-      this.error = "Desktop bridge missing. Restart app.";
+      this.error = "桌面桥接未加载，请重启应用。";
       this.render();
       return;
     }
-    this.pushLog("info", "Workbench booting...");
+    this.pushLog("info", "工作台启动中...");
     await this.refreshAll();
   }
 
   private pushLog(level: LogLevel, message: string): void {
-    this.logs = [{ id: this.logId++, time: nowText(), level, message }, ...this.logs].slice(0, 180);
+    this.logs = [{ id: this.logId++, time: nowText(), level, message }, ...this.logs].slice(0, 220);
   }
 
   private applyCodexStatus(status: CodexStatusReport): void {
@@ -111,6 +73,9 @@ export class RestoreAppView {
     }
     if (this.selectedThreadIds.size === 0 && status.threads[0]) {
       this.selectedThreadIds.add(status.threads[0].id);
+    }
+    if (!allowed.has(this.activeThreadId)) {
+      this.activeThreadId = status.threads[0]?.id ?? "";
     }
     const knownBackups = new Set(status.backups.map((b) => b.path));
     if (!knownBackups.has(this.selectedBackupPath)) {
@@ -132,10 +97,10 @@ export class RestoreAppView {
       if (!this.cursorCandidates.some((item) => item.id === this.cursorCandidateId)) {
         this.cursorCandidateId = this.cursorCandidates[0]?.id ?? "";
       }
-      this.pushLog("success", "Workbench ready.");
+      this.pushLog("success", "工作台已就绪。");
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
-      this.pushLog("error", `Refresh failed: ${this.error}`);
+      this.pushLog("error", `刷新失败：${this.error}`);
     } finally {
       this.busy = false;
       this.render();
@@ -149,14 +114,14 @@ export class RestoreAppView {
 
   private requireRisk(action: string): boolean {
     if (this.riskAck) return true;
-    this.error = `${action}: please check risk confirmation first.`;
-    this.pushLog("warning", `${action} blocked (risk confirmation missing).`);
+    this.error = `${action}：请先勾选风险确认。`;
+    this.pushLog("warning", `${action}已拦截（未确认风险）。`);
     this.render();
     return false;
   }
 
   private confirmAction(title: string, body: string): boolean {
-    return window.confirm(`${title}\n\n${body}\n\nPlease close Cursor/Codex before continuing.`);
+    return window.confirm(`${title}\n\n${body}\n\n继续前请先关闭 Cursor/Codex。`);
   }
 
   private async withBusy(task: () => Promise<void>): Promise<void> {
@@ -193,19 +158,107 @@ export class RestoreAppView {
     this.render();
   }
 
+  private selectOnlyActive(): void {
+    if (!this.activeThreadId) return;
+    this.selectedThreadIds = new Set([this.activeThreadId]);
+    this.render();
+  }
+
+  private toggleSortDirection(): void {
+    this.sortDirection = this.sortDirection === "asc" ? "desc" : "asc";
+    this.render();
+  }
+
+  private getFilteredThreads(): CodexThreadStatus[] {
+    const rows = this.codexStatus?.threads ?? [];
+    const query = normalizeText(this.threadQuery);
+    let filtered = rows.filter((thread) => {
+      if (this.threadFilter === "need-sync" && !thread.syncCandidate) return false;
+      if (this.threadFilter === "archived" && thread.archived === 0) return false;
+      if (
+        this.threadFilter === "missing" &&
+        !thread.status.includes("missing-db") &&
+        !thread.status.includes("missing-jsonl")
+      ) {
+        return false;
+      }
+      if (this.threadFilter === "selected" && !this.selectedThreadIds.has(thread.id)) return false;
+      if (!query) return true;
+      const bag = [
+        thread.title,
+        thread.id,
+        thread.provider,
+        thread.model,
+        thread.jsonlProvider,
+        thread.cwd
+      ]
+        .join(" ")
+        .toLowerCase();
+      return bag.includes(query);
+    });
+
+    filtered = [...filtered].sort((a, b) => {
+      let cmp = 0;
+      if (this.threadSort === "updated") cmp = a.updatedAtMs - b.updatedAtMs;
+      else if (this.threadSort === "title") cmp = a.title.localeCompare(b.title);
+      else cmp = a.provider.localeCompare(b.provider);
+      return this.sortDirection === "asc" ? cmp : -cmp;
+    });
+    return filtered;
+  }
+
+  private getActiveThread(): CodexThreadStatus | null {
+    const rows = this.codexStatus?.threads ?? [];
+    return rows.find((row) => row.id === this.activeThreadId) ?? null;
+  }
+
+  private focusThreadRow(threadId: string): void {
+    if (!threadId) return;
+    queueMicrotask(() => {
+      const row = this.root.querySelector<HTMLElement>(`[data-row-id="${threadId}"]`);
+      row?.focus();
+    });
+  }
+
+  private activateThread(threadId: string, focus = false): void {
+    if (!threadId) return;
+    this.activeThreadId = threadId;
+    this.render();
+    if (focus) this.focusThreadRow(threadId);
+  }
+
+  private toggleThreadSelection(threadId: string): void {
+    if (!threadId) return;
+    if (this.selectedThreadIds.has(threadId)) this.selectedThreadIds.delete(threadId);
+    else this.selectedThreadIds.add(threadId);
+    this.render();
+    this.focusThreadRow(threadId);
+  }
+
+  private moveActiveThread(offset: number): void {
+    const rows = this.getFilteredThreads();
+    if (rows.length === 0) return;
+    const currentIndex = rows.findIndex((row) => row.id === this.activeThreadId);
+    const baseIndex = currentIndex === -1 ? (offset >= 0 ? 0 : rows.length - 1) : currentIndex;
+    const nextIndex = Math.min(rows.length - 1, Math.max(0, baseIndex + offset));
+    const next = rows[nextIndex];
+    if (!next) return;
+    this.activateThread(next.id, true);
+  }
+
   private async syncSelected(): Promise<void> {
     if (!this.codexStatus) return;
-    if (!this.requireRisk("Sync Selected")) return;
+    if (!this.requireRisk("同步所选会话")) return;
     const threadIds = [...this.selectedThreadIds];
     if (threadIds.length === 0) {
-      this.error = "No thread selected.";
+      this.error = "请先选择会话。";
       this.render();
       return;
     }
     if (
       !this.confirmAction(
-        "Sync Selected Threads",
-        `Threads: ${threadIds.length}\nPatch JSONL: ${this.patchJsonl ? "ON" : "OFF"}`
+        "同步所选会话",
+        `会话数量：${threadIds.length}\n同步时修复 JSONL 头：${this.patchJsonl ? "开启" : "关闭"}`
       )
     ) {
       return;
@@ -218,20 +271,20 @@ export class RestoreAppView {
       });
       this.pushLog(
         "success",
-        `Sync done: rows=${result.updatedRows}, archivedCopies=${result.copiedArchivedJsonl}, jsonlPatched=${result.jsonlPatched}`
+        `同步完成：数据库更新 ${result.updatedRows}，归档回填 ${result.copiedArchivedJsonl}，JSONL 修复 ${result.jsonlPatched}`
       );
-      this.pushLog("info", `Backup: ${result.backupPath}`);
+      this.pushLog("info", `备份：${result.backupPath}`);
       await this.refreshCodexOnly();
     });
   }
 
   private async syncCandidates(): Promise<void> {
     if (!this.codexStatus) return;
-    if (!this.requireRisk("Sync Candidates")) return;
+    if (!this.requireRisk("同步候选会话")) return;
     if (
       !this.confirmAction(
-        "Sync All Candidates",
-        `Auto-select all sync candidates.\nPatch JSONL: ${this.patchJsonl ? "ON" : "OFF"}`
+        "同步全部候选会话",
+        `自动选择全部候选会话。\n同步时修复 JSONL 头：${this.patchJsonl ? "开启" : "关闭"}`
       )
     ) {
       return;
@@ -243,19 +296,19 @@ export class RestoreAppView {
       });
       this.pushLog(
         "success",
-        `Candidate sync done: rows=${result.updatedRows}, archivedCopies=${result.copiedArchivedJsonl}, jsonlPatched=${result.jsonlPatched}`
+        `候选同步完成：数据库更新 ${result.updatedRows}，归档回填 ${result.copiedArchivedJsonl}，JSONL 修复 ${result.jsonlPatched}`
       );
-      this.pushLog("info", `Backup: ${result.backupPath}`);
+      this.pushLog("info", `备份：${result.backupPath}`);
       await this.refreshCodexOnly();
     });
   }
 
   private async deleteSelected(): Promise<void> {
     if (!this.codexStatus) return;
-    if (!this.requireRisk("Delete Selected")) return;
+    if (!this.requireRisk("删除所选会话")) return;
     const threadIds = [...this.selectedThreadIds];
     if (threadIds.length === 0) {
-      this.error = "No thread selected for delete.";
+      this.error = "删除前请先选择会话。";
       this.render();
       return;
     }
@@ -265,9 +318,11 @@ export class RestoreAppView {
         threadIds,
         dryRun: true
       });
+      this.lastDeletePreview = preview;
+      this.render();
       const ok = this.confirmAction(
-        "Delete Selected Threads",
-        `Threads: ${preview.selectedThreads}\nJSONL matches: ${preview.matchedJsonlFiles}\nThis performs soft-delete to history_sync_deleted.`
+        "删除所选会话",
+        `会话数量：${preview.selectedThreads}\n匹配 JSONL：${preview.matchedJsonlFiles}\n将执行软删除到 history_sync_deleted。`
       );
       if (!ok) return;
 
@@ -278,39 +333,40 @@ export class RestoreAppView {
       });
       this.pushLog(
         "warning",
-        `Delete done: dbRows=${result.deletedDbRows}, movedJsonl=${result.movedJsonlFiles}, removedIndex=${result.removedIndexRows}`
+        `删除完成：数据库行 ${result.deletedDbRows}，移动 JSONL ${result.movedJsonlFiles}，移除索引 ${result.removedIndexRows}`
       );
-      if (result.backupPath) this.pushLog("info", `Delete backup: ${result.backupPath}`);
-      if (result.deletedDir) this.pushLog("info", `Deleted dir: ${result.deletedDir}`);
+      if (result.backupPath) this.pushLog("info", `删除备份：${result.backupPath}`);
+      if (result.deletedDir) this.pushLog("info", `删除目录：${result.deletedDir}`);
+      this.lastDeletePreview = null;
       await this.refreshCodexOnly();
     });
   }
 
   private async createBackup(): Promise<void> {
     if (!this.codexStatus) return;
-    if (!this.requireRisk("Create Backup")) return;
-    if (!this.confirmAction("Create Manual Backup", "Create a new state_5.sqlite backup now.")) return;
+    if (!this.requireRisk("创建手动备份")) return;
+    if (!this.confirmAction("创建手动备份", "立即创建新的 state_5.sqlite 备份。")) return;
     await this.withBusy(async () => {
       const result = await window.restoreApp.codexBackupCreate({
         candidateId: this.codexStatus!.candidateId
       });
-      this.pushLog("success", `Backup created: ${result.backupPath}`);
+      this.pushLog("success", `备份创建成功：${result.backupPath}`);
       await this.refreshCodexOnly();
     });
   }
 
   private async restoreBackup(pathToRestore: string): Promise<void> {
     if (!this.codexStatus) return;
-    if (!this.requireRisk("Restore Backup")) return;
+    if (!this.requireRisk("恢复备份")) return;
     if (!pathToRestore) {
-      this.error = "No backup selected.";
+      this.error = "请先选择备份文件。";
       this.render();
       return;
     }
     if (
       !this.confirmAction(
-        "Restore Backup",
-        `Restore from:\n${pathToRestore}\nA pre-restore safety backup will be created automatically.`
+        "恢复备份",
+        `将从以下路径恢复：\n${pathToRestore}\n恢复前会自动创建安全备份。`
       )
     ) {
       return;
@@ -320,8 +376,8 @@ export class RestoreAppView {
         candidateId: this.codexStatus!.candidateId,
         backupPath: pathToRestore
       });
-      this.pushLog("success", `Restored: ${result.restoredFrom}`);
-      this.pushLog("info", `Safety backup: ${result.safetyBackup}`);
+      this.pushLog("success", `恢复完成：${result.restoredFrom}`);
+      this.pushLog("info", `安全备份：${result.safetyBackup}`);
       await this.refreshCodexOnly();
     });
   }
@@ -329,14 +385,14 @@ export class RestoreAppView {
   private async openBackupDir(): Promise<void> {
     await this.withBusy(async () => {
       await window.restoreApp.openCodexBackup({ candidateId: this.codexStatus?.candidateId });
-      this.pushLog("info", "Opened backup directory.");
+      this.pushLog("info", "已打开备份目录。");
     });
   }
 
   private async openDeletedDir(): Promise<void> {
     await this.withBusy(async () => {
       await window.restoreApp.openCodexDeleted({ candidateId: this.codexStatus?.candidateId });
-      this.pushLog("info", "Opened deleted directory.");
+      this.pushLog("info", "已打开删除目录。");
     });
   }
 
@@ -347,7 +403,7 @@ export class RestoreAppView {
       this.cursorPlan = null;
       this.cursorResult = null;
       this.cursorStage = "diagnose";
-      this.pushLog("success", "Cursor diagnose done.");
+      this.pushLog("success", "Cursor 诊断完成。");
     });
   }
 
@@ -357,29 +413,29 @@ export class RestoreAppView {
       this.cursorPlan = await window.restoreApp.previewRepair(this.cursorCandidateId);
       this.cursorResult = null;
       this.cursorStage = "preview";
-      this.pushLog("success", "Cursor preview ready.");
+      this.pushLog("success", "Cursor 预览已生成。");
     });
   }
 
   private async runCursorRepair(): Promise<void> {
     if (!this.cursorPlan) return;
-    if (!this.requireRisk("Cursor Repair")) return;
-    if (!this.confirmAction("Run Cursor Repair", "This will write Cursor metadata in state database.")) return;
+    if (!this.requireRisk("Cursor 修复")) return;
+    if (!this.confirmAction("执行 Cursor 修复", "该操作会写入 Cursor 的 state 数据库元数据。")) return;
     await this.withBusy(async () => {
       this.cursorResult = await window.restoreApp.applyRepair(this.cursorPlan!.planId);
       this.cursorStage = "repair";
-      this.pushLog("success", `Cursor repaired. Backup: ${this.cursorResult.backupPath}`);
+      this.pushLog("success", `Cursor 修复完成。备份：${this.cursorResult.backupPath}`);
       await this.refreshAll();
     });
   }
 
   private async runCursorRestoreLatest(): Promise<void> {
     if (!this.cursorCandidateId) return;
-    if (!this.requireRisk("Cursor Restore")) return;
-    if (!this.confirmAction("Restore Cursor Latest Backup", "Restore latest Cursor backup and overwrite current state.")) return;
+    if (!this.requireRisk("Cursor 恢复备份")) return;
+    if (!this.confirmAction("恢复 Cursor 最新备份", "将使用最新备份覆盖当前 Cursor 状态。")) return;
     await this.withBusy(async () => {
       const result = await window.restoreApp.restoreLatestBackup(this.cursorCandidateId);
-      this.pushLog("success", `Cursor restored from: ${result.restoredFrom}`);
+      this.pushLog("success", `Cursor 已恢复：${result.restoredFrom}`);
       await this.refreshAll();
     });
   }
@@ -388,7 +444,21 @@ export class RestoreAppView {
     if (!this.cursorCandidateId) return;
     await this.withBusy(async () => {
       await window.restoreApp.openBackupFolder(this.cursorCandidateId);
-      this.pushLog("info", "Opened Cursor backup directory.");
+      this.pushLog("info", "已打开 Cursor 备份目录。");
+    });
+  }
+
+  private prepareKeyboardAccessibility(): void {
+    this.root.querySelectorAll<HTMLElement>("[data-row-id]").forEach((row) => {
+      row.tabIndex = 0;
+      row.setAttribute("aria-label", `会话行 ${row.dataset.rowId ?? ""}`);
+      row.setAttribute("aria-selected", row.dataset.rowId === this.activeThreadId ? "true" : "false");
+    });
+
+    this.root.querySelectorAll<HTMLInputElement>("[data-thread-id]").forEach((checkbox) => {
+      const parentRow = checkbox.closest("tr");
+      const titleCell = parentRow?.querySelector("td:nth-child(2)")?.textContent?.trim() ?? checkbox.dataset.threadId ?? "";
+      checkbox.setAttribute("aria-label", `选择会话 ${titleCell}`);
     });
   }
 
@@ -399,6 +469,7 @@ export class RestoreAppView {
     pick("select-all")?.addEventListener("click", () => this.selectAll());
     pick("select-sync")?.addEventListener("click", () => this.selectNeedSync());
     pick("select-clear")?.addEventListener("click", () => this.clearSelection());
+    pick("select-active-only")?.addEventListener("click", () => this.selectOnlyActive());
     pick("sync-selected")?.addEventListener("click", () => void this.syncSelected());
     pick("sync-candidates")?.addEventListener("click", () => void this.syncCandidates());
     pick("delete-selected")?.addEventListener("click", () => void this.deleteSelected());
@@ -417,12 +488,47 @@ export class RestoreAppView {
     pick("cursor-open-backups")?.addEventListener("click", () => void this.openCursorBackupDir());
 
     this.root.querySelectorAll<HTMLInputElement>("[data-thread-id]").forEach((checkbox) => {
+      checkbox.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
       checkbox.addEventListener("change", () => {
         const id = checkbox.dataset.threadId ?? "";
         if (!id) return;
         if (checkbox.checked) this.selectedThreadIds.add(id);
         else this.selectedThreadIds.delete(id);
         this.render();
+        this.focusThreadRow(id);
+      });
+    });
+
+    this.root.querySelectorAll<HTMLElement>("[data-row-id]").forEach((row) => {
+      row.addEventListener("click", () => {
+        const id = row.dataset.rowId ?? "";
+        if (!id) return;
+        this.activateThread(id);
+      });
+      row.addEventListener("keydown", (event) => {
+        const id = row.dataset.rowId ?? "";
+        if (!id) return;
+        if (event.key === "Enter") {
+          event.preventDefault();
+          this.activateThread(id, true);
+          return;
+        }
+        if (event.key === " ") {
+          event.preventDefault();
+          this.toggleThreadSelection(id);
+          return;
+        }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          this.moveActiveThread(1);
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          this.moveActiveThread(-1);
+        }
       });
     });
 
@@ -453,408 +559,58 @@ export class RestoreAppView {
       this.cursorResult = null;
       this.render();
     });
+
+    const search = this.root.querySelector<HTMLInputElement>("[data-search]");
+    search?.addEventListener("input", () => {
+      this.threadQuery = search.value;
+      this.render();
+    });
+
+    this.root.querySelectorAll<HTMLElement>("[data-filter]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const filter = (btn.dataset.filter ?? "all") as ThreadFilter;
+        this.threadFilter = filter;
+        this.render();
+      });
+    });
+
+    const sortSelect = this.root.querySelector<HTMLSelectElement>("[data-sort]");
+    sortSelect?.addEventListener("change", () => {
+      this.threadSort = sortSelect.value as ThreadSort;
+      this.render();
+    });
+
+    pick("toggle-sort-direction")?.addEventListener("click", () => this.toggleSortDirection());
   }
 
   render(): void {
-    const codex = this.codexStatus;
-    const threads = codex?.threads ?? [];
-    const selectedCount = this.selectedThreadIds.size;
-    const needSyncCount = threads.filter((t) => t.syncCandidate).length;
-    const currentProvider = codex?.currentProvider ?? "-";
-    const currentModel = codex?.currentModel ?? "-";
+    const viewState: WorkbenchViewState = {
+      busy: this.busy,
+      error: this.error,
+      logs: this.logs,
+      riskAck: this.riskAck,
+      patchJsonl: this.patchJsonl,
+      codexStatus: this.codexStatus,
+      filteredThreads: this.getFilteredThreads(),
+      activeThread: this.getActiveThread(),
+      selectedThreadIds: this.selectedThreadIds,
+      selectedBackupPath: this.selectedBackupPath,
+      activeThreadId: this.activeThreadId,
+      threadQuery: this.threadQuery,
+      threadFilter: this.threadFilter,
+      threadSort: this.threadSort,
+      sortDirection: this.sortDirection,
+      cursorCandidates: this.cursorCandidates,
+      cursorCandidateId: this.cursorCandidateId,
+      cursorStage: this.cursorStage,
+      cursorReport: this.cursorReport,
+      cursorPlan: this.cursorPlan,
+      cursorResult: this.cursorResult,
+      lastDeletePreview: this.lastDeletePreview
+    };
 
-    const threadRows =
-      threads.length === 0
-        ? `<tr><td colspan="10" class="cell-empty">No threads found</td></tr>`
-        : threads
-            .map((thread) => {
-              const badge = threadState(thread);
-              return `
-                <tr>
-                  <td><input type="checkbox" data-thread-id="${escapeHtml(thread.id)}" ${this.selectedThreadIds.has(thread.id) ? "checked" : ""} ${this.busy ? "disabled" : ""}/></td>
-                  <td title="${escapeHtml(thread.title)}">${escapeHtml(thread.title)}</td>
-                  <td>${escapeHtml(thread.provider || "-")}</td>
-                  <td>${escapeHtml(thread.model || "-")}</td>
-                  <td>${escapeHtml(thread.jsonlProvider || "-")}</td>
-                  <td><span class="state-pill ${badge.tone}">${escapeHtml(badge.label)}</span></td>
-                  <td>${escapeHtml(formatTime(thread.updatedAt))}</td>
-                  <td title="${escapeHtml(thread.cwd || "-")}">${escapeHtml(thread.cwd || "-")}</td>
-                  <td title="${escapeHtml(thread.id)}">${escapeHtml(thread.id)}</td>
-                </tr>
-              `;
-            })
-            .join("");
-
-    const backupOptions =
-      codex?.backups.length
-        ? codex.backups
-            .map(
-              (b) =>
-                `<option value="${escapeHtml(b.path)}" ${this.selectedBackupPath === b.path ? "selected" : ""}>${escapeHtml(b.modifiedAt)} | ${escapeHtml(b.name)}</option>`
-            )
-            .join("")
-        : `<option value="">No backup available</option>`;
-
-    const providerStats =
-      codex?.providerCounts.length
-        ? codex.providerCounts.map((p) => `<li>${escapeHtml(p.key)}: ${p.count}</li>`).join("")
-        : "<li>-</li>";
-    const modelStats =
-      codex?.modelCounts.length
-        ? codex.modelCounts.map((p) => `<li>${escapeHtml(p.key)}: ${p.count}</li>`).join("")
-        : "<li>-</li>";
-
-    const cursorOptions =
-      this.cursorCandidates.length === 0
-        ? `<option value="">No Cursor environment</option>`
-        : this.cursorCandidates
-            .map(
-              (c) =>
-                `<option value="${escapeHtml(c.id)}" ${this.cursorCandidateId === c.id ? "selected" : ""}>${escapeHtml(c.rootPath)}</option>`
-            )
-            .join("");
-
-    const cursorIssues =
-      this.cursorReport?.issues.length
-        ? `<ul>${this.cursorReport.issues.map((i) => `<li><strong>${escapeHtml(i.code)}</strong>: ${escapeHtml(i.message)}</li>`).join("")}</ul>`
-        : "<p>No diagnose result.</p>";
-    const cursorPreview = this.cursorPlan
-      ? `Threads=${this.cursorPlan.summary.threadCount}, SQLite=${this.cursorPlan.summary.sqliteUpdates}, JSONL=${this.cursorPlan.summary.jsonlUpdates}`
-      : "No preview result.";
-    const cursorResult = this.cursorResult
-      ? `Updated threads=${this.cursorResult.summary.updatedThreads}, JSONL=${this.cursorResult.summary.updatedJsonlFiles}, backup=${this.cursorResult.backupPath}`
-      : "No repair result.";
-
-    const steps = cursorStepList(this.cursorStage)
-      .map((s) => `<div class="cursor-step ${s.state}"><div>${escapeHtml(s.state.toUpperCase())}</div><div>${escapeHtml(s.label)}</div></div>`)
-      .join("");
-
-    const logs =
-      this.logs.length === 0
-        ? `<div class="cell-empty">No logs yet</div>`
-        : this.logs
-            .map(
-              (l) =>
-                `<div class="log-row ${l.level}"><span>${escapeHtml(l.time)}</span><span>${escapeHtml(l.level.toUpperCase())}</span><span>${escapeHtml(l.message)}</span></div>`
-            )
-            .join("");
-
-    this.root.innerHTML = `
-      <style>
-        :root {
-          --bg: #f3f7fb;
-          --panel: #ffffff;
-          --line: #dee6ef;
-          --line-soft: #edf2f7;
-          --text: #172b40;
-          --muted: #627488;
-          --brand: #1f5ea8;
-          --brand-deep: #153b67;
-          --ok: #1f7a4a;
-          --warn: #b06a1a;
-          --danger: #b13a36;
-        }
-        * { box-sizing: border-box; }
-        body { margin: 0; }
-        .workbench {
-          min-height: 100vh;
-          background:
-            radial-gradient(1200px 540px at -8% -10%, #d6eaff 0%, transparent 58%),
-            radial-gradient(900px 420px at 105% -8%, #e6fff2 0%, transparent 56%),
-            var(--bg);
-          color: var(--text);
-          font-family: "Avenir Next", "Segoe UI Variable Text", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-          padding: 22px;
-        }
-        .hero {
-          background: linear-gradient(128deg, #173f67 0%, #215983 58%, #2e755e 100%);
-          border-radius: 18px;
-          color: #f7fbff;
-          padding: 20px 22px;
-          box-shadow: 0 22px 48px rgba(16, 28, 45, 0.25);
-          animation: fadeIn 380ms ease-out;
-        }
-        .hero h1 { margin: 0; font-size: 28px; letter-spacing: 0.3px; }
-        .hero p { margin: 9px 0 0; font-size: 13px; color: rgba(247, 251, 255, 0.86); }
-        .layout {
-          margin-top: 14px;
-          display: grid;
-          grid-template-columns: minmax(0, 1.8fr) minmax(360px, 1fr);
-          gap: 14px;
-        }
-        .panel {
-          background: var(--panel);
-          border: 1px solid var(--line);
-          border-radius: 14px;
-          box-shadow: 0 9px 22px rgba(16, 30, 43, 0.06);
-          padding: 14px;
-          animation: fadeIn 420ms ease-out;
-        }
-        .panel h2 { margin: 0; font-size: 20px; }
-        .muted { color: var(--muted); font-size: 13px; }
-        .kpis {
-          margin-top: 10px;
-          display: grid;
-          grid-template-columns: repeat(5, minmax(0, 1fr));
-          gap: 8px;
-        }
-        .kpi {
-          border: 1px solid var(--line-soft);
-          border-radius: 10px;
-          padding: 9px;
-          background: #f8fbff;
-        }
-        .kpi .v { font-size: 23px; font-weight: 700; color: var(--brand-deep); line-height: 1.1; }
-        .kpi .k { margin-top: 3px; font-size: 12px; color: var(--muted); }
-        .toolbar {
-          margin-top: 10px;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-        .controls {
-          margin-top: 10px;
-          display: grid;
-          gap: 7px;
-        }
-        .risk-box {
-          border: 1px solid #f1d7d6;
-          background: #fff7f7;
-          border-radius: 9px;
-          color: #973532;
-          font-size: 12px;
-          padding: 8px 10px;
-        }
-        .table-wrap {
-          margin-top: 10px;
-          border: 1px solid var(--line);
-          border-radius: 10px;
-          overflow: auto;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 12px;
-        }
-        th, td {
-          border-bottom: 1px solid var(--line-soft);
-          padding: 8px;
-          text-align: left;
-          white-space: nowrap;
-          vertical-align: middle;
-        }
-        th {
-          position: sticky;
-          top: 0;
-          background: #f6fbff;
-          color: #4f6073;
-          font-weight: 600;
-        }
-        .state-pill {
-          display: inline-block;
-          border-radius: 999px;
-          padding: 2px 8px;
-          font-size: 11px;
-          font-weight: 600;
-        }
-        .state-pill.ok { background: #e9f8f0; color: var(--ok); }
-        .state-pill.warn { background: #fff2e2; color: var(--warn); }
-        .state-pill.danger { background: #ffecec; color: var(--danger); }
-        .cards {
-          margin-top: 10px;
-          display: grid;
-          gap: 10px;
-        }
-        .card {
-          border: 1px solid var(--line-soft);
-          border-radius: 10px;
-          padding: 10px;
-          background: #fbfdff;
-        }
-        .card h3 { margin: 0 0 8px; font-size: 14px; }
-        .stats-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 10px;
-        }
-        .log-box {
-          border: 1px solid var(--line);
-          border-radius: 10px;
-          max-height: 250px;
-          overflow: auto;
-          background: #f9fbfe;
-        }
-        .log-row {
-          display: grid;
-          grid-template-columns: 126px 76px 1fr;
-          gap: 8px;
-          padding: 8px 10px;
-          font-size: 12px;
-          border-bottom: 1px solid #edf2f8;
-        }
-        .log-row.info span:nth-child(2) { color: #2064b1; font-weight: 700; }
-        .log-row.success span:nth-child(2) { color: #1f7a4a; font-weight: 700; }
-        .log-row.warning span:nth-child(2) { color: #b06a1a; font-weight: 700; }
-        .log-row.error span:nth-child(2) { color: #b13a36; font-weight: 700; }
-        .cursor-steps {
-          margin-top: 10px;
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 8px;
-        }
-        .cursor-step {
-          border: 1px solid var(--line);
-          border-radius: 9px;
-          padding: 7px;
-          font-size: 11px;
-          color: #506074;
-        }
-        .cursor-step.done { background: #ecf8f1; color: #1f7a4a; border-color: #cde7d9; }
-        .cursor-step.current { background: #eaf4ff; color: #1f5ea8; border-color: #c9ddfb; }
-        .cell-empty {
-          padding: 14px;
-          text-align: center;
-          color: #728295;
-        }
-        .tip-busy { margin-top: 10px; color: #1f5ea8; font-size: 13px; }
-        .tip-error { margin-top: 6px; color: #b13a36; font-size: 13px; }
-        button, select { font: inherit; }
-        button {
-          border: 1px solid #ced8e4;
-          background: #fff;
-          border-radius: 9px;
-          padding: 6px 10px;
-          cursor: pointer;
-          transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
-        }
-        button:hover:not(:disabled) {
-          transform: translateY(-1px);
-          border-color: #96afcd;
-          box-shadow: 0 6px 14px rgba(36, 61, 86, 0.12);
-        }
-        button:disabled { opacity: 0.46; cursor: not-allowed; transform: none; box-shadow: none; }
-        .btn-primary { background: var(--brand); color: #fff; border-color: var(--brand); }
-        .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
-        select {
-          border: 1px solid #ced8e4;
-          background: #fff;
-          border-radius: 8px;
-          padding: 6px 8px;
-          width: 100%;
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(6px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @media (max-width: 1200px) {
-          .layout { grid-template-columns: 1fr; }
-          .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          .stats-grid { grid-template-columns: 1fr; }
-        }
-      </style>
-      <div class="workbench">
-        <header class="hero">
-          <h1>Codex Recovery Workbench</h1>
-          <p>Thread-level recovery console for Codex, with an isolated Cursor repair lane.</p>
-        </header>
-        <div class="layout">
-          <section class="panel">
-            <h2>Codex Console</h2>
-            <div class="muted">${escapeHtml(codex?.codexHome ?? "No Codex environment found")}</div>
-            <div class="kpis">
-              <div class="kpi"><div class="v">${codex?.totalThreads ?? 0}</div><div class="k">Total Threads</div></div>
-              <div class="kpi"><div class="v">${codex?.visibleThreads ?? 0}</div><div class="k">Visible</div></div>
-              <div class="kpi"><div class="v">${codex?.movableThreads ?? 0}</div><div class="k">Need Sync</div></div>
-              <div class="kpi"><div class="v">${selectedCount}</div><div class="k">Selected</div></div>
-              <div class="kpi"><div class="v">${needSyncCount}</div><div class="k">Candidates</div></div>
-            </div>
-            <div class="toolbar">
-              <button data-id="refresh" ${this.busy ? "disabled" : ""}>Refresh</button>
-              <button data-id="select-all" ${this.busy ? "disabled" : ""}>Select All</button>
-              <button data-id="select-sync" ${this.busy ? "disabled" : ""}>Select Need Sync</button>
-              <button data-id="select-clear" ${this.busy ? "disabled" : ""}>Clear</button>
-              <button class="btn-primary" data-id="sync-selected" ${this.busy ? "disabled" : ""}>Sync Selected</button>
-              <button class="btn-primary" data-id="sync-candidates" ${this.busy ? "disabled" : ""}>Sync Candidates</button>
-              <button class="btn-danger" data-id="delete-selected" ${this.busy ? "disabled" : ""}>Delete Selected</button>
-            </div>
-            <div class="controls">
-              <label><input type="checkbox" data-patch-jsonl ${this.patchJsonl ? "checked" : ""} ${this.busy ? "disabled" : ""}/> Patch JSONL headers during sync</label>
-              <label><input type="checkbox" data-risk ${this.riskAck ? "checked" : ""} ${this.busy ? "disabled" : ""}/> I understand risk and already backed up data</label>
-              <div class="risk-box">High-risk actions modify local SQLite/JSONL data. Always close Cursor/Codex before write operations.</div>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Pick</th><th>Title</th><th>DB Provider</th><th>Model</th><th>JSONL Provider</th><th>Status</th><th>Updated</th><th>CWD</th><th>Thread ID</th>
-                  </tr>
-                </thead>
-                <tbody>${threadRows}</tbody>
-              </table>
-            </div>
-          </section>
-
-          <aside class="panel">
-            <h2>Operations</h2>
-            <div class="cards">
-              <div class="card">
-                <h3>Backup Workbench</h3>
-                <select data-backup ${this.busy ? "disabled" : ""}>${backupOptions}</select>
-                <div class="toolbar">
-                  <button data-id="create-backup" ${this.busy ? "disabled" : ""}>Create Backup</button>
-                  <button data-id="restore-selected" ${this.busy ? "disabled" : ""}>Restore Selected</button>
-                  <button data-id="restore-latest" ${this.busy ? "disabled" : ""}>Restore Latest</button>
-                  <button data-id="open-backups" ${this.busy ? "disabled" : ""}>Open Backups Dir</button>
-                  <button data-id="open-deleted" ${this.busy ? "disabled" : ""}>Open Deleted Dir</button>
-                </div>
-              </div>
-
-              <div class="card">
-                <h3>Context Snapshot</h3>
-                <div class="muted">Provider: <strong>${escapeHtml(currentProvider)}</strong></div>
-                <div class="muted">Model: <strong>${escapeHtml(currentModel)}</strong></div>
-                <div class="stats-grid">
-                  <div>
-                    <div class="muted">Provider distribution</div>
-                    <ul>${providerStats}</ul>
-                  </div>
-                  <div>
-                    <div class="muted">Model distribution</div>
-                    <ul>${modelStats}</ul>
-                  </div>
-                </div>
-              </div>
-
-              <div class="card">
-                <h3>Cursor Recovery Lane</h3>
-                <select data-cursor ${this.busy ? "disabled" : ""}>${cursorOptions}</select>
-                <div class="cursor-steps">${steps}</div>
-                <div class="toolbar">
-                  <button data-id="cursor-diagnose" ${this.busy || !this.cursorCandidateId ? "disabled" : ""}>Diagnose</button>
-                  <button data-id="cursor-preview" ${this.busy || !this.cursorCandidateId ? "disabled" : ""}>Preview</button>
-                  <button class="btn-primary" data-id="cursor-repair" ${this.busy || !this.cursorPlan ? "disabled" : ""}>Repair</button>
-                  <button data-id="cursor-restore" ${this.busy || !this.cursorCandidateId ? "disabled" : ""}>Restore Latest</button>
-                  <button data-id="cursor-open-backups" ${this.busy || !this.cursorCandidateId ? "disabled" : ""}>Open Backup Dir</button>
-                </div>
-                <div class="cards">
-                  <div class="card"><h3>Diagnose</h3>${cursorIssues}</div>
-                  <div class="card"><h3>Preview</h3><p>${escapeHtml(cursorPreview)}</p></div>
-                  <div class="card"><h3>Result</h3><p>${escapeHtml(cursorResult)}</p></div>
-                </div>
-              </div>
-
-              <div class="card">
-                <h3>Operation Logs</h3>
-                <div class="log-box">${logs}</div>
-              </div>
-            </div>
-          </aside>
-        </div>
-        ${this.busy ? `<div class="tip-busy">Running...</div>` : ""}
-        ${this.error ? `<div class="tip-error">${escapeHtml(this.error)}</div>` : ""}
-      </div>
-    `;
-
+    this.root.innerHTML = renderWorkbench(viewState);
+    this.prepareKeyboardAccessibility();
     this.bindEvents();
   }
 }

@@ -1,0 +1,17 @@
+{
+  "name": "codex-history-restore-rework",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "desktop",
+    "packages/core"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace desktop",
+    "build": "npm run build --workspace @restore/core && npm run build --workspace desktop",
+    "test": "npm run test --workspace @restore/core && npm run test --workspace desktop",
+    "test:core": "npm run test --workspace @restore/core",
+    "test:desktop": "npm run test --workspace desktop",
+    "package:win": "npm run package:win --workspace desktop"
+  }
+}

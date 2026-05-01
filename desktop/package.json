@@ -1,0 +1,25 @@
+{
+  "name": "desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "node ./electron/dev.mjs",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "test": "node --experimental-strip-types ./src/run-desktop-tests.ts",
+    "package:win": "npm run build && node ./electron/package-win.mjs"
+  },
+  "dependencies": {
+    "@restore/core": "0.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "electron": "^37.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  }
+}

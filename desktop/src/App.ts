@@ -7,7 +7,7 @@ import type {
   RepairPlan,
   RepairResult
 } from "./types.ts";
-import { renderWorkbench } from "./ui/workbench-render.ts";
+import { renderThreadDetails, renderWorkbench } from "./ui/workbench-render.ts";
 import { ensureWorkbenchStyle } from "./ui/workbench-style.ts";
 import { normalizeText, nowText } from "./ui/workbench-utils.ts";
 import type {
@@ -144,7 +144,7 @@ export class RestoreAppView {
   private selectAll(): void {
     if (!this.codexStatus) return;
     this.selectedThreadIds = new Set(this.codexStatus.threads.map((item) => item.id));
-    this.render();
+    if (this.threadFilter === "selected" || !this.patchSelectionUi()) this.render();
   }
 
   private selectNeedSync(): void {
@@ -152,18 +152,18 @@ export class RestoreAppView {
     this.selectedThreadIds = new Set(
       this.codexStatus.threads.filter((item) => item.syncCandidate).map((item) => item.id)
     );
-    this.render();
+    if (this.threadFilter === "selected" || !this.patchSelectionUi()) this.render();
   }
 
   private clearSelection(): void {
     this.selectedThreadIds.clear();
-    this.render();
+    if (this.threadFilter === "selected" || !this.patchSelectionUi()) this.render();
   }
 
   private selectOnlyActive(): void {
     if (!this.activeThreadId) return;
     this.selectedThreadIds = new Set([this.activeThreadId]);
-    this.render();
+    if (this.threadFilter === "selected" || !this.patchSelectionUi()) this.render();
   }
 
   private toggleSortDirection(): void {
@@ -214,10 +214,69 @@ export class RestoreAppView {
     return rows.find((row) => row.id === this.activeThreadId) ?? null;
   }
 
+  private escapeForSelector(value: string): string {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+      return CSS.escape(value);
+    }
+    return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  }
+
+  private updateSelectionCounters(): void {
+    const selected = this.selectedThreadIds.size;
+    const total = this.codexStatus?.threads.length ?? 0;
+    const kpiSelected = this.root.querySelector<HTMLElement>('[data-bind="kpi-selected"]');
+    if (kpiSelected) kpiSelected.textContent = String(selected);
+    const statusSelected = this.root.querySelector<HTMLElement>('[data-bind="status-selected"]');
+    if (statusSelected) statusSelected.textContent = `${selected} / ${total}`;
+  }
+
+  private patchActiveThreadUi(): boolean {
+    const rows = this.root.querySelectorAll<HTMLElement>("[data-row-id]");
+    if (rows.length === 0) return false;
+    rows.forEach((row) => {
+      const isActive = (row.dataset.rowId ?? "") === this.activeThreadId;
+      row.classList.toggle("row-active", isActive);
+      row.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+
+    const detailBody = this.root.querySelector<HTMLElement>('[data-bind="thread-detail-body"]');
+    if (detailBody) {
+      detailBody.innerHTML = renderThreadDetails(this.getActiveThread());
+    }
+
+    const activeOnlyButton = this.root.querySelector<HTMLButtonElement>('[data-id="select-active-only"]');
+    if (activeOnlyButton) {
+      activeOnlyButton.disabled = this.busy || !this.activeThreadId;
+    }
+    return true;
+  }
+
+  private patchSelectionUi(threadId?: string): boolean {
+    const checkboxes = this.root.querySelectorAll<HTMLInputElement>("[data-thread-id]");
+    if (checkboxes.length === 0) return false;
+
+    if (threadId) {
+      const selectorId = this.escapeForSelector(threadId);
+      const checkbox = this.root.querySelector<HTMLInputElement>(`[data-thread-id="${selectorId}"]`);
+      if (checkbox) {
+        checkbox.checked = this.selectedThreadIds.has(threadId);
+      }
+    } else {
+      checkboxes.forEach((checkbox) => {
+        const id = checkbox.dataset.threadId ?? "";
+        checkbox.checked = this.selectedThreadIds.has(id);
+      });
+    }
+
+    this.updateSelectionCounters();
+    return true;
+  }
+
   private focusThreadRow(threadId: string): void {
     if (!threadId) return;
     queueMicrotask(() => {
-      const row = this.root.querySelector<HTMLElement>(`[data-row-id="${threadId}"]`);
+      const selectorId = this.escapeForSelector(threadId);
+      const row = this.root.querySelector<HTMLElement>(`[data-row-id="${selectorId}"]`);
       row?.focus();
     });
   }
@@ -225,7 +284,9 @@ export class RestoreAppView {
   private activateThread(threadId: string, focus = false): void {
     if (!threadId) return;
     this.activeThreadId = threadId;
-    this.render();
+    if (!this.patchActiveThreadUi()) {
+      this.render();
+    }
     if (focus) this.focusThreadRow(threadId);
   }
 
@@ -233,7 +294,9 @@ export class RestoreAppView {
     if (!threadId) return;
     if (this.selectedThreadIds.has(threadId)) this.selectedThreadIds.delete(threadId);
     else this.selectedThreadIds.add(threadId);
-    this.render();
+    if (this.threadFilter === "selected" || !this.patchSelectionUi(threadId)) {
+      this.render();
+    }
     this.focusThreadRow(threadId);
   }
 
@@ -498,7 +561,9 @@ export class RestoreAppView {
         if (!id) return;
         if (checkbox.checked) this.selectedThreadIds.add(id);
         else this.selectedThreadIds.delete(id);
-        this.render();
+        if (this.threadFilter === "selected" || !this.patchSelectionUi(id)) {
+          this.render();
+        }
         this.focusThreadRow(id);
       });
     });

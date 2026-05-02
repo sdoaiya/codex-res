@@ -28,7 +28,7 @@ function renderThreadRows(state: WorkbenchViewState): string {
     .join("");
 }
 
-function renderThreadDetails(activeThread: CodexThreadStatus | null): string {
+export function renderThreadDetails(activeThread: CodexThreadStatus | null): string {
   if (!activeThread) return `<div class="cell-empty">请选择一行查看会话详情</div>`;
 
   const status = threadBadge(activeThread).label;
@@ -129,10 +129,10 @@ function renderCodexPanel(state: WorkbenchViewState): string {
       <div class="muted">${escapeHtml(codexHome)}</div>
 
       <div class="kpis">
-        <div class="kpi"><div class="v">${totalThreads}</div><div class="k">总会话</div></div>
+        <div class="kpi"><div class="v" data-bind="kpi-total">${totalThreads}</div><div class="k">总会话</div></div>
         <div class="kpi"><div class="v">${codex?.visibleThreads ?? 0}</div><div class="k">可见</div></div>
         <div class="kpi"><div class="v">${codex?.movableThreads ?? 0}</div><div class="k">待同步</div></div>
-        <div class="kpi"><div class="v">${state.selectedThreadIds.size}</div><div class="k">已选择</div></div>
+        <div class="kpi"><div class="v" data-bind="kpi-selected">${state.selectedThreadIds.size}</div><div class="k">已选择</div></div>
         <div class="kpi"><div class="v">${state.filteredThreads.length}</div><div class="k">筛选结果</div></div>
       </div>
 
@@ -192,7 +192,7 @@ function renderCodexPanel(state: WorkbenchViewState): string {
 
       <section class="thread-detail">
         <h3>会话详情</h3>
-        ${renderThreadDetails(state.activeThread)}
+        <div data-bind="thread-detail-body">${renderThreadDetails(state.activeThread)}</div>
       </section>
     </section>
   `;
@@ -280,7 +280,7 @@ function renderStatusStrip(state: WorkbenchViewState): string {
     <div class="status-strip">
       <div class="status-item"><span>运行状态</span><strong>${state.busy ? "执行中" : "空闲"}</strong></div>
       <div class="status-item"><span>风险确认</span><strong>${state.riskAck ? "已确认" : "未确认"}</strong></div>
-      <div class="status-item"><span>会话选择</span><strong>${selected} / ${total}</strong></div>
+      <div class="status-item"><span>会话选择</span><strong data-bind="status-selected">${selected} / ${total}</strong></div>
       <div class="status-item"><span>Cursor 阶段</span><strong>${escapeHtml(stage)}</strong></div>
     </div>
   `;

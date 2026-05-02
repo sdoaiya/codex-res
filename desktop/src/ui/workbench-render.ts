@@ -290,15 +290,30 @@ export function renderWorkbench(state: WorkbenchViewState): string {
   return `
     <div class="workbench">
       <div class="app-shell">
-        <header class="hero">
-          <h1>Codex 恢复工作台</h1>
-          <p>面向会话恢复、备份治理与 Cursor 修复的轻量桌面工作台。</p>
+        <header class="chrome-bar">
+          <div class="chrome-left">
+            <span class="chrome-dot red"></span>
+            <span class="chrome-dot yellow"></span>
+            <span class="chrome-dot green"></span>
+          </div>
+          <div class="chrome-title">Codex Recovery Studio</div>
+          <div class="chrome-right">
+            <span class="chrome-pill">本地模式</span>
+            <span class="chrome-pill">${state.busy ? "任务执行中" : "就绪"}</span>
+          </div>
+        </header>
+
+        <header class="topbar">
+          <h1>会话修复工作台</h1>
+          <p>聚焦 Codex 会话修复、备份回滚与 Cursor 元数据修复。</p>
           ${renderStatusStrip(state)}
         </header>
+
         <div class="layout">
           ${renderCodexPanel(state)}
           ${renderOperationsPanel(state)}
         </div>
+
         ${state.busy ? `<div class="banner banner-busy">任务执行中...</div>` : ""}
         ${state.error ? `<div class="banner banner-error">${escapeHtml(state.error)}</div>` : ""}
       </div>

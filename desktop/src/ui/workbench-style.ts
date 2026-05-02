@@ -828,6 +828,74 @@ export const WORKBENCH_STYLE = `
       padding: 9px 10px;
     }
   }
+
+  @media (max-width: 760px) {
+    .app-shell {
+      border-radius: 6px;
+      padding: 6px;
+      min-height: calc(100vh - 8px);
+    }
+
+    .chrome-bar {
+      border-radius: 7px;
+      padding: 6px 8px;
+    }
+
+    .chrome-right {
+      display: none;
+    }
+
+    .topbar {
+      border-radius: 7px;
+      padding: 8px 9px;
+    }
+
+    .topbar h1 {
+      font-size: 15px;
+    }
+
+    .topbar p {
+      font-size: 10px;
+    }
+
+    .panel {
+      border-radius: 7px;
+      padding: 8px;
+    }
+
+    .kpis {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .kpi {
+      padding: 6px;
+    }
+
+    .kpi .v {
+      font-size: 16px;
+    }
+
+    .table-wrap {
+      max-height: 300px;
+    }
+
+    table {
+      font-size: 10px;
+    }
+
+    th,
+    td {
+      padding: 5px 4px;
+    }
+
+    table th:nth-child(5),
+    table td:nth-child(5),
+    table th:nth-child(8),
+    table td:nth-child(8) {
+      display: none;
+    }
+  }
 `;
 
 export function ensureWorkbenchStyle(): void {

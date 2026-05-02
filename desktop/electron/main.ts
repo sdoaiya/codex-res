@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, shell } from "electron";
 import {
   applyRepair,
   createCodexBackup,
@@ -60,8 +60,11 @@ async function resolveCodexRootPath(candidateId?: string): Promise<string> {
 
 function createWindow() {
   const window = new BrowserWindow({
-    width: 1400,
-    height: 920,
+    width: 700,
+    height: 460,
+    minWidth: 640,
+    minHeight: 420,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: false,
@@ -69,6 +72,8 @@ function createWindow() {
     }
   });
 
+  window.removeMenu();
+  window.setMenuBarVisibility(false);
   window.loadFile(path.join(app.getAppPath(), "index.html"));
 }
 
@@ -154,6 +159,7 @@ ipcMain.handle("codex.open-deleted", async (_event, payload?: CodexTargetPayload
 });
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

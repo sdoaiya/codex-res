@@ -2,9 +2,9 @@ export const WORKBENCH_STYLE_ID = "codex-recovery-workbench-style";
 
 export const WORKBENCH_STYLE = `
   :root {
-    --wb-bg: #eef2f7;
-    --wb-bg-2: #f7f9fc;
-    --wb-shell: #f5f8fc;
+    --wb-bg: #edf1f6;
+    --wb-bg-2: #f3f6fa;
+    --wb-shell: #f7f9fc;
     --wb-panel: #ffffff;
     --wb-panel-2: #f9fbfe;
     --wb-line: #d4deea;
@@ -21,8 +21,8 @@ export const WORKBENCH_STYLE = `
     --wb-danger-soft: #fff0ef;
     --wb-info: #225a98;
     --wb-info-soft: #edf5ff;
-    --wb-shadow-soft: 0 8px 18px rgba(11, 26, 42, 0.06);
-    --wb-shadow-hard: 0 16px 28px rgba(11, 26, 42, 0.08);
+    --wb-shadow-soft: 0 3px 10px rgba(11, 26, 42, 0.05);
+    --wb-shadow-hard: 0 8px 18px rgba(11, 26, 42, 0.06);
     --wb-space-1: 4px;
     --wb-space-2: 8px;
     --wb-space-3: 12px;
@@ -46,36 +46,33 @@ export const WORKBENCH_STYLE = `
   .workbench {
     min-height: 100vh;
     background:
-      radial-gradient(900px 460px at -14% -18%, rgba(91, 140, 196, 0.13), transparent 65%),
-      radial-gradient(720px 380px at 108% -12%, rgba(91, 173, 143, 0.1), transparent 62%),
+      radial-gradient(920px 480px at -14% -18%, rgba(91, 140, 196, 0.08), transparent 68%),
       linear-gradient(180deg, var(--wb-bg), var(--wb-bg-2));
-    padding: var(--wb-space-4);
+    padding: var(--wb-space-2);
   }
 
   .app-shell {
-    max-width: 1680px;
-    margin: 0 auto;
-    border-radius: 14px;
-    border: 1px solid #ccd8e6;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(250, 252, 255, 0.9)),
-      var(--wb-shell);
+    width: 100%;
+    min-height: calc(100vh - var(--wb-space-4));
+    border-radius: 10px;
+    border: 1px solid #d5dfeb;
+    background: var(--wb-shell);
     box-shadow: var(--wb-shadow-hard);
-    padding: var(--wb-space-4);
+    padding: var(--wb-space-3);
   }
 
   .hero {
-    border-radius: 12px;
+    border-radius: 9px;
     color: #eef5ff;
-    padding: 14px 16px;
-    border: 1px solid rgba(190, 216, 245, 0.24);
-    background: linear-gradient(128deg, #1c3655 0%, #254a74 48%, #2a6659 100%);
+    padding: 10px 12px;
+    border: 1px solid rgba(183, 206, 235, 0.34);
+    background: linear-gradient(130deg, #1c3655 0%, #24486f 60%, #2a5d58 100%);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
   }
 
   .hero h1 {
     margin: 0;
-    font-size: 21px;
+    font-size: 20px;
     line-height: 1.25;
     letter-spacing: 0.02em;
     font-weight: 640;
@@ -83,22 +80,22 @@ export const WORKBENCH_STYLE = `
 
   .hero p {
     margin: var(--wb-space-2) 0 0;
-    font-size: 12px;
+    font-size: 11px;
     color: rgba(238, 245, 255, 0.88);
   }
 
   .status-strip {
-    margin-top: var(--wb-space-3);
+    margin-top: var(--wb-space-2);
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--wb-space-2);
   }
 
   .status-item {
-    border: 1px solid rgba(190, 218, 247, 0.52);
-    border-radius: 9px;
-    background: rgba(246, 250, 255, 0.16);
-    padding: 7px 9px;
+    border: 1px solid rgba(196, 219, 244, 0.45);
+    border-radius: 8px;
+    background: rgba(246, 250, 255, 0.12);
+    padding: 6px 8px;
     display: grid;
     gap: 1px;
   }
@@ -117,14 +114,14 @@ export const WORKBENCH_STYLE = `
   .layout {
     margin-top: var(--wb-space-3);
     display: grid;
-    grid-template-columns: minmax(0, 1.9fr) minmax(340px, 0.95fr);
+    grid-template-columns: minmax(0, 2.1fr) minmax(360px, 1fr);
     gap: var(--wb-space-3);
   }
 
   .panel {
     background: var(--wb-panel);
     border: 1px solid var(--wb-line);
-    border-radius: 11px;
+    border-radius: 9px;
     box-shadow: var(--wb-shadow-soft);
     padding: var(--wb-space-3);
   }
@@ -165,7 +162,7 @@ export const WORKBENCH_STYLE = `
 
   .kpi {
     border: 1px solid var(--wb-line-soft);
-    border-radius: 9px;
+    border-radius: 8px;
     background: var(--wb-panel-2);
     padding: 7px;
   }
@@ -201,9 +198,9 @@ export const WORKBENCH_STYLE = `
   }
 
   .danger-zone {
-    border: 1px solid #efc7c5;
-    border-radius: 9px;
-    background: #fff8f8;
+    border: 1px solid #e8ced0;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #fffaf9, #fffefe);
     padding: 9px;
   }
 
@@ -242,7 +239,7 @@ export const WORKBENCH_STYLE = `
 
   .risk-box {
     border: 1px solid #f0dbd8;
-    border-radius: 9px;
+    border-radius: 8px;
     background: #fff8f7;
     color: #97332f;
     padding: 7px 9px;
@@ -273,7 +270,7 @@ export const WORKBENCH_STYLE = `
   .table-wrap {
     margin-top: var(--wb-space-2);
     border: 1px solid var(--wb-line);
-    border-radius: 9px;
+    border-radius: 8px;
     overflow: auto;
     max-height: 430px;
     background: #fff;
@@ -342,7 +339,7 @@ export const WORKBENCH_STYLE = `
   .thread-detail {
     margin-top: var(--wb-space-2);
     border: 1px solid var(--wb-line-soft);
-    border-radius: 9px;
+    border-radius: 8px;
     background: #fbfdff;
     padding: var(--wb-space-2);
   }
@@ -362,7 +359,7 @@ export const WORKBENCH_STYLE = `
 
   .thread-meta-grid > div {
     border: 1px solid var(--wb-line-soft);
-    border-radius: 8px;
+    border-radius: 7px;
     background: #fff;
     padding: 7px;
     display: grid;
@@ -392,8 +389,8 @@ export const WORKBENCH_STYLE = `
 
   .card {
     border: 1px solid var(--wb-line-soft);
-    border-radius: 9px;
-    background: var(--wb-panel-2);
+    border-radius: 8px;
+    background: #fafcff;
     padding: var(--wb-space-2);
   }
 
@@ -422,7 +419,7 @@ export const WORKBENCH_STYLE = `
 
   .log-box {
     border: 1px solid var(--wb-line);
-    border-radius: 9px;
+    border-radius: 8px;
     max-height: 280px;
     overflow: auto;
     background: #f8fbff;
@@ -494,7 +491,7 @@ export const WORKBENCH_STYLE = `
 
   .cursor-step {
     border: 1px solid var(--wb-line);
-    border-radius: 8px;
+    border-radius: 7px;
     background: #fff;
     padding: 6px;
     font-size: 10px;
@@ -528,7 +525,7 @@ export const WORKBENCH_STYLE = `
 
   .banner {
     margin-top: var(--wb-space-2);
-    border-radius: 9px;
+    border-radius: 8px;
     padding: 8px 10px;
     font-size: 11px;
   }
@@ -553,7 +550,7 @@ export const WORKBENCH_STYLE = `
 
   button {
     border: 1px solid #c7d5e5;
-    border-radius: 8px;
+    border-radius: 7px;
     background: #fff;
     color: var(--wb-text);
     padding: 5px 9px;
@@ -637,15 +634,14 @@ export const WORKBENCH_STYLE = `
   }
 
   .danger-outline {
-    border-color: #d96f69 !important;
-    box-shadow: inset 0 0 0 1px rgba(212, 74, 66, 0.14);
+    border-color: #cd746f !important;
   }
 
   select,
   input[type="text"] {
     width: 100%;
     border: 1px solid #ccdae8;
-    border-radius: 7px;
+    border-radius: 6px;
     background: #fff;
     color: var(--wb-text);
     padding: 5px 7px;
@@ -687,28 +683,19 @@ export const WORKBENCH_STYLE = `
     color: var(--wb-muted);
   }
 
-  ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: #eef3f9;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    border: 2px solid #eef3f9;
-    border-radius: 999px;
-    background: #c2d1e3;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: #a8bed8;
+  .panel,
+  .card,
+  .kpi,
+  .status-item,
+  .danger-zone,
+  .risk-box {
+    transition: border-color 140ms ease, background-color 140ms ease;
   }
 
   @media (max-width: 1280px) {
     .app-shell {
       padding: var(--wb-space-3);
+      min-height: calc(100vh - var(--wb-space-3));
     }
 
     .layout {

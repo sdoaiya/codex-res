@@ -1,5 +1,4 @@
 import type { CodexThreadStatus, CodexCountRow, EnvironmentCandidate } from "../types.ts";
-import { WORKBENCH_STYLE } from "./workbench-style.ts";
 import type { CursorStage, WorkbenchViewState } from "./workbench-types.ts";
 import { cursorStepList, cursorStepStateLabel, escapeHtml, formatTime, logLevelLabel, threadBadge } from "./workbench-utils.ts";
 
@@ -289,19 +288,20 @@ function renderStatusStrip(state: WorkbenchViewState): string {
 
 export function renderWorkbench(state: WorkbenchViewState): string {
   return `
-    <style>${WORKBENCH_STYLE}</style>
     <div class="workbench">
-      <header class="hero">
-        <h1>Codex 恢复工作台</h1>
-        <p>面向会话恢复、备份治理与 Cursor 修复的轻量桌面工作台。</p>
-        ${renderStatusStrip(state)}
-      </header>
-      <div class="layout">
-        ${renderCodexPanel(state)}
-        ${renderOperationsPanel(state)}
+      <div class="app-shell">
+        <header class="hero">
+          <h1>Codex 恢复工作台</h1>
+          <p>面向会话恢复、备份治理与 Cursor 修复的轻量桌面工作台。</p>
+          ${renderStatusStrip(state)}
+        </header>
+        <div class="layout">
+          ${renderCodexPanel(state)}
+          ${renderOperationsPanel(state)}
+        </div>
+        ${state.busy ? `<div class="banner banner-busy">任务执行中...</div>` : ""}
+        ${state.error ? `<div class="banner banner-error">${escapeHtml(state.error)}</div>` : ""}
       </div>
-      ${state.busy ? `<div class="banner banner-busy">任务执行中...</div>` : ""}
-      ${state.error ? `<div class="banner banner-error">${escapeHtml(state.error)}</div>` : ""}
     </div>
   `;
 }

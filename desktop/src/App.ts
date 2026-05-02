@@ -8,6 +8,7 @@ import type {
   RepairResult
 } from "./types.ts";
 import { renderWorkbench } from "./ui/workbench-render.ts";
+import { ensureWorkbenchStyle } from "./ui/workbench-style.ts";
 import { normalizeText, nowText } from "./ui/workbench-utils.ts";
 import type {
   CursorStage,
@@ -51,6 +52,7 @@ export class RestoreAppView {
   }
 
   async init(): Promise<void> {
+    ensureWorkbenchStyle();
     this.render();
     if (!window.restoreApp) {
       this.error = "桌面桥接未加载，请重启应用。";
@@ -609,6 +611,7 @@ export class RestoreAppView {
       lastDeletePreview: this.lastDeletePreview
     };
 
+    ensureWorkbenchStyle();
     this.root.innerHTML = renderWorkbench(viewState);
     this.prepareKeyboardAccessibility();
     this.bindEvents();

@@ -1,11 +1,16 @@
 import type { CodexThreadStatus } from "../types.ts";
-import type { CursorStage, LogLevel } from "./workbench-types.ts";
+import type { CursorStage, LogLevel, RiskChecklistState } from "./workbench-types.ts";
 
 const cursorLabels: Record<CursorStage, string> = {
   scan: "扫描",
   diagnose: "诊断",
   preview: "预览",
   repair: "修复"
+};
+
+const riskChecklistLabels: Record<keyof RiskChecklistState, string> = {
+  appsClosed: "已关闭 Codex / Cursor",
+  backupReady: "已完成备份"
 };
 
 export function escapeHtml(value: string): string {
@@ -64,4 +69,29 @@ export function logLevelLabel(level: LogLevel): string {
   if (level === "success") return "成功";
   if (level === "warning") return "警告";
   return "错误";
+}
+
+export function riskAckLabel(acknowledged: boolean): string {
+  return acknowledged ? "已确认" : "未确认";
+}
+
+export function riskChecklistItemLabel(item: keyof RiskChecklistState): string {
+  return riskChecklistLabels[item];
+}
+
+export function riskChecklistStateLabel(done: boolean): string {
+  return done ? "已满足" : "未满足";
+}
+
+export function riskChecklistSummary(checklist: RiskChecklistState): string {
+  const complete = Object.values(checklist).every(Boolean);
+  return complete ? "风控前置检查已完成" : "风控前置检查未完成";
+}
+
+export function collapseStateLabel(expanded: boolean): string {
+  return expanded ? "已展开" : "已收起";
+}
+
+export function collapseActionLabel(expanded: boolean): string {
+  return expanded ? "收起" : "展开";
 }

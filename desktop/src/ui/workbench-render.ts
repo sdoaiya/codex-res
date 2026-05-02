@@ -1,10 +1,22 @@
-import type { CodexThreadStatus, CodexCountRow, EnvironmentCandidate } from "../types.ts";
-import type { CursorStage, WorkbenchViewState } from "./workbench-types.ts";
-import { cursorStepList, cursorStepStateLabel, escapeHtml, formatTime, logLevelLabel, threadBadge } from "./workbench-utils.ts";
+import type { CodexCountRow, CodexThreadStatus, EnvironmentCandidate } from "../types.ts";
+import type { CursorStage, WorkbenchPanelState, WorkbenchViewState } from "./workbench-types.ts";
+import {
+  collapseActionLabel,
+  cursorStepList,
+  cursorStepStateLabel,
+  escapeHtml,
+  formatTime,
+  logLevelLabel,
+  riskAckLabel,
+  riskChecklistItemLabel,
+  riskChecklistStateLabel,
+  riskChecklistSummary,
+  threadBadge
+} from "./workbench-utils.ts";
 
 function renderThreadRows(state: WorkbenchViewState): string {
   if (state.filteredThreads.length === 0) {
-    return `<tr><td colspan="10" class="cell-empty">当前筛选条件下没有会话</td></tr>`;
+    return `<tr><td colspan="9" class="cell-empty">当前筛选条件下没有会话</td></tr>`;
   }
 
   return state.filteredThreads
@@ -13,7 +25,14 @@ function renderThreadRows(state: WorkbenchViewState): string {
       const active = thread.id === state.activeThreadId;
       return `
         <tr data-row-id="${escapeHtml(thread.id)}" class="${active ? "row-active" : ""}">
-          <td><input type="checkbox" data-thread-id="${escapeHtml(thread.id)}" ${state.selectedThreadIds.has(thread.id) ? "checked" : ""} ${state.busy ? "disabled" : ""} /></td>
+          <td>
+            <input
+              type="checkbox"
+              data-thread-id="${escapeHtml(thread.id)}"
+              ${state.selectedThreadIds.has(thread.id) ? "checked" : ""}
+              ${state.busy ? "disabled" : ""}
+            />
+          </td>
           <td title="${escapeHtml(thread.title)}">${escapeHtml(thread.title)}</td>
           <td>${escapeHtml(thread.provider || "-")}</td>
           <td>${escapeHtml(thread.model || "-")}</td>
@@ -29,7 +48,7 @@ function renderThreadRows(state: WorkbenchViewState): string {
 }
 
 export function renderThreadDetails(activeThread: CodexThreadStatus | null): string {
-  if (!activeThread) return `<div class="cell-empty">请选择一行查看会话详情</div>`;
+  if (!activeThread) return `<div class="cell-empty">请选择一条会话查看详情</div>`;
 
   const status = threadBadge(activeThread).label;
   return `
@@ -84,25 +103,32 @@ function renderCursorStepLane(stage: CursorStage): string {
   return cursorStepList(stage)
     .map(
       (step) =>
-        `<div class="cursor-step ${step.state}"><div class="cursor-step-state">${escapeHtml(cursorStepStateLabel(step.state))}</div><div>${escapeHtml(step.label)}</div></div>`
+        `<div class="cursor-step ${step.state}">
+          <div class="cursor-step-state">${escapeHtml(cursorStepStateLabel(step.state))}</div>
+          <div>${escapeHtml(step.label)}</div>
+        </div>`
     )
     .join("");
 }
 
-function renderLogs(logs: WorkbenchViewState["logs"]): string {
-  if (logs.length === 0) return `<div class="cell-empty">暂无日志</div>`;
-  return logs
-    .map(
-      (log) =>
-        `<div class="log-row ${log.level}"><span class="log-time">${escapeHtml(log.time)}</span><span class="log-level">${escapeHtml(logLevelLabel(log.level))}</span><span class="log-message">${escapeHtml(log.message)}</span></div>`
-    )
+function renderLogsRows(state: WorkbenchViewState): string {
+  if (state.logs.length === 0) return `<div class="cell-empty">暂无日志</div>`;
+  return state.logs
+    .map((log, index) => {
+      const hidden = !state.logsExpanded && index >= 3;
+      return `<div class="log-row ${log.level}" data-log-row ${hidden ? "hidden" : ""}>
+        <span class="log-time">${escapeHtml(log.time)}</span>
+        <span class="log-level">${escapeHtml(logLevelLabel(log.level))}</span>
+        <span class="log-message">${escapeHtml(log.message)}</span>
+      </div>`;
+    })
     .join("");
 }
 
 function renderDeletePreview(state: WorkbenchViewState): string {
   const preview = state.lastDeletePreview;
   if (!preview) {
-    return `<p>删除前会自动生成预览。执行一次“删除所选”后将在这里展示影响摘要。</p>`;
+    return `<p>删除前会先自动生成预览。执行一次“删除所选”后会在这里显示影响摘要。</p>`;
   }
   return `
     <div class="meta-line"><span>选中会话</span><strong>${preview.selectedThreads}</strong></div>
@@ -111,6 +137,85 @@ function renderDeletePreview(state: WorkbenchViewState): string {
     <div class="meta-line"><span>移动文件数</span><strong>${preview.movedJsonlFiles}</strong></div>
     <div class="meta-line"><span>索引移除行</span><strong>${preview.removedIndexRows}</strong></div>
     <div class="muted">预览模式：${preview.dryRun ? "是" : "否"}，确认后才会执行真实写入。</div>
+  `;
+}
+
+function resolvePanels(state: WorkbenchViewState): WorkbenchPanelState {
+  const fallback: WorkbenchPanelState = {
+    backup: true,
+    deletePreview: false,
+    snapshot: false,
+    cursor: true,
+    logs: false
+  };
+  return { ...fallback, ...state.operationPanels };
+}
+
+function renderPanelCard(
+  key: keyof WorkbenchPanelState,
+  title: string,
+  open: boolean,
+  body: string,
+  state: WorkbenchViewState
+): string {
+  return `
+    <section class="card card-collapsible" data-collapsed="${open ? "0" : "1"}">
+      <div class="card-head">
+        <h3>${title}</h3>
+        <button
+          type="button"
+          class="btn-soft btn-mini"
+          data-toggle-panel="${key}"
+          aria-expanded="${open ? "true" : "false"}"
+          data-open="${open ? "1" : "0"}"
+          ${state.busy ? "disabled" : ""}
+        >${collapseActionLabel(open)}</button>
+      </div>
+      <div class="card-body" data-panel="${key}" ${open ? "" : "hidden"}>
+        ${body}
+      </div>
+    </section>
+  `;
+}
+
+function renderRiskChecklist(state: WorkbenchViewState): string {
+  const checklist = state.riskChecklist;
+  const allReady = checklist.appsClosed && checklist.backupReady;
+  return `
+    <section class="risk-checklist">
+      <div class="meta-line">
+        <span>总确认</span>
+        <strong>${riskAckLabel(state.riskAck)}</strong>
+      </div>
+      <div class="check-row">
+        <label>
+          <input type="checkbox" data-risk-apps-closed ${checklist.appsClosed ? "checked" : ""} ${state.busy ? "disabled" : ""} />
+          ${riskChecklistItemLabel("appsClosed")}
+        </label>
+        <span class="check-state">${riskChecklistStateLabel(checklist.appsClosed)}</span>
+      </div>
+      <div class="check-row">
+        <label>
+          <input type="checkbox" data-risk-backup-ready ${checklist.backupReady ? "checked" : ""} ${state.busy ? "disabled" : ""} />
+          ${riskChecklistItemLabel("backupReady")}
+        </label>
+        <span class="check-state">${riskChecklistStateLabel(checklist.backupReady)}</span>
+      </div>
+      <div class="check-row">
+        <label>
+          <input type="checkbox" data-risk ${state.riskAck ? "checked" : ""} ${state.busy ? "disabled" : ""} />
+          我已了解风险并允许写入变更
+        </label>
+      </div>
+      <label class="patch-toggle">
+        <input type="checkbox" data-patch-jsonl ${state.patchJsonl ? "checked" : ""} ${state.busy ? "disabled" : ""} />
+        同步时修复 JSONL 头部
+      </label>
+      <div class="risk-box">
+        <div>${riskChecklistSummary(checklist)}</div>
+        <div>风控状态：<strong data-bind="risk-status">${allReady && state.riskAck ? "已确认" : "未确认"}</strong></div>
+      </div>
+    </section>
   `;
 }
 
@@ -123,76 +228,107 @@ function renderCodexPanel(state: WorkbenchViewState): string {
   return `
     <section class="panel">
       <div class="section-head">
-        <h2>Codex 控制台</h2>
+        <h2>Codex 会话工作台</h2>
         <button class="btn-soft" data-id="refresh" ${state.busy ? "disabled" : ""}>刷新</button>
       </div>
-      <div class="muted">${escapeHtml(codexHome)}</div>
+      <div class="muted path-line">${escapeHtml(codexHome)}</div>
 
-      <div class="kpis">
-        <div class="kpi"><div class="v" data-bind="kpi-total">${totalThreads}</div><div class="k">总会话</div></div>
+      <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr));">
+        <div class="kpi"><div class="v">${totalThreads}</div><div class="k">总会话</div></div>
         <div class="kpi"><div class="v">${codex?.visibleThreads ?? 0}</div><div class="k">可见</div></div>
-        <div class="kpi"><div class="v">${codex?.movableThreads ?? 0}</div><div class="k">待同步</div></div>
+        <div class="kpi"><div class="v">${needSyncCount}</div><div class="k">待同步</div></div>
         <div class="kpi"><div class="v" data-bind="kpi-selected">${state.selectedThreadIds.size}</div><div class="k">已选择</div></div>
         <div class="kpi"><div class="v">${state.filteredThreads.length}</div><div class="k">筛选结果</div></div>
+        <div class="kpi"><div class="v">${codex?.movableThreads ?? 0}</div><div class="k">可修复</div></div>
       </div>
 
-      <div class="section-title">选择操作</div>
-      <div class="action-grid">
-        <div class="toolbar">
-          <button class="btn-soft" data-id="select-all" ${state.busy ? "disabled" : ""}>全选</button>
-          <button class="btn-soft" data-id="select-sync" ${state.busy ? "disabled" : ""}>选择待同步 (${needSyncCount})</button>
-          <button class="btn-soft" data-id="select-clear" ${state.busy ? "disabled" : ""}>清空选择</button>
-          <button class="btn-soft" data-id="select-active-only" ${state.busy || !state.activeThreadId ? "disabled" : ""}>仅选当前</button>
+      <div class="cards" style="margin-top:var(--wb-space-2);">
+        <section class="card">
+          <div class="card-head">
+            <h3>批量操作</h3>
+            <span class="muted">先选择会话，再执行写入</span>
+          </div>
+          <div class="action-grid">
+            <div class="toolbar">
+              <button class="btn-soft" data-id="select-all" ${state.busy ? "disabled" : ""}>全选</button>
+              <button class="btn-soft" data-id="select-sync" ${state.busy ? "disabled" : ""}>选择待同步 (${needSyncCount})</button>
+              <button class="btn-soft" data-id="select-clear" ${state.busy ? "disabled" : ""}>清空选择</button>
+              <button class="btn-soft" data-id="select-active-only" ${state.busy || !state.activeThreadId ? "disabled" : ""}>仅选当前</button>
+            </div>
+            <div class="danger-zone">
+              <div class="danger-zone-title">写入与删除</div>
+              <div class="danger-zone-tip">以下操作会改动本地 SQLite / JSONL 数据。</div>
+              <div class="toolbar">
+                <button class="btn-primary danger-outline" data-id="sync-selected" data-requires-risk ${state.busy ? "disabled" : ""}>同步所选</button>
+                <button class="btn-primary danger-outline" data-id="sync-candidates" data-requires-risk ${state.busy ? "disabled" : ""}>同步候选</button>
+                <button class="btn-danger danger-outline" data-id="delete-selected" data-requires-risk ${state.busy ? "disabled" : ""}>删除所选</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h3>风险控制</h3>
+            <span class="muted">三项确认全部通过后才可写入</span>
+          </div>
+          ${renderRiskChecklist(state)}
+        </section>
+      </div>
+
+      <section class="card" style="margin-top:var(--wb-space-2);">
+        <div class="card-head">
+          <h3>会话区</h3>
+          <span class="muted">键盘：←/→切换，Enter查看，Space勾选</span>
         </div>
-        <div class="toolbar danger-zone">
-          <div class="danger-zone-title">高风险写入操作</div>
-          <div class="danger-zone-tip">这些操作会写入或删除本地会话数据。执行前请确认已备份。</div>
-          <button class="btn-primary danger-outline" data-id="sync-selected" ${state.busy ? "disabled" : ""}>同步所选</button>
-          <button class="btn-primary danger-outline" data-id="sync-candidates" ${state.busy ? "disabled" : ""}>同步候选</button>
-          <button class="btn-danger danger-outline" data-id="delete-selected" ${state.busy ? "disabled" : ""}>删除所选</button>
+        <div class="thread-controls">
+          <input
+            type="text"
+            placeholder="搜索会话标题 / ID / Provider / 路径..."
+            value="${escapeHtml(state.threadQuery)}"
+            data-search
+            ${state.busy ? "disabled" : ""}
+          />
+          <select data-sort ${state.busy ? "disabled" : ""}>
+            <option value="updated" ${state.threadSort === "updated" ? "selected" : ""}>按更新时间</option>
+            <option value="title" ${state.threadSort === "title" ? "selected" : ""}>按标题</option>
+            <option value="provider" ${state.threadSort === "provider" ? "selected" : ""}>按 Provider</option>
+          </select>
+          <button class="btn-soft" data-id="toggle-sort-direction" ${state.busy ? "disabled" : ""}>
+            排序方向：${state.sortDirection === "asc" ? "升序" : "降序"}
+          </button>
+          <div class="filter-row">
+            <button class="filter-chip ${state.threadFilter === "all" ? "active" : ""}" data-filter="all" ${state.busy ? "disabled" : ""}>全部</button>
+            <button class="filter-chip ${state.threadFilter === "need-sync" ? "active" : ""}" data-filter="need-sync" ${state.busy ? "disabled" : ""}>待同步</button>
+            <button class="filter-chip ${state.threadFilter === "archived" ? "active" : ""}" data-filter="archived" ${state.busy ? "disabled" : ""}>仅归档</button>
+            <button class="filter-chip ${state.threadFilter === "missing" ? "active" : ""}" data-filter="missing" ${state.busy ? "disabled" : ""}>数据缺失</button>
+            <button class="filter-chip ${state.threadFilter === "selected" ? "active" : ""}" data-filter="selected" ${state.busy ? "disabled" : ""}>已选择</button>
+          </div>
         </div>
-      </div>
 
-      <div class="section-title">风险控制</div>
-      <div class="controls">
-        <label><input type="checkbox" data-patch-jsonl ${state.patchJsonl ? "checked" : ""} ${state.busy ? "disabled" : ""} /> 同步时修复 JSONL 头</label>
-        <label><input type="checkbox" data-risk ${state.riskAck ? "checked" : ""} ${state.busy ? "disabled" : ""} /> 我已了解风险并完成数据备份</label>
-        <div class="risk-box">高风险写入会修改本地 SQLite/JSONL。执行写入前请关闭 Cursor 与 Codex。</div>
-      </div>
-
-      <div class="section-title">会话浏览</div>
-      <div class="thread-controls">
-        <input type="text" placeholder="搜索会话标题 / ID / Provider / 路径..." value="${escapeHtml(state.threadQuery)}" data-search ${state.busy ? "disabled" : ""} />
-        <select data-sort ${state.busy ? "disabled" : ""}>
-          <option value="updated" ${state.threadSort === "updated" ? "selected" : ""}>按更新时间</option>
-          <option value="title" ${state.threadSort === "title" ? "selected" : ""}>按标题</option>
-          <option value="provider" ${state.threadSort === "provider" ? "selected" : ""}>按 Provider</option>
-        </select>
-        <button class="btn-soft" data-id="toggle-sort-direction" ${state.busy ? "disabled" : ""}>排序方向：${state.sortDirection === "asc" ? "升序" : "降序"}</button>
-        <div class="filter-row">
-          <button class="filter-chip ${state.threadFilter === "all" ? "active" : ""}" data-filter="all" ${state.busy ? "disabled" : ""}>全部</button>
-          <button class="filter-chip ${state.threadFilter === "need-sync" ? "active" : ""}" data-filter="need-sync" ${state.busy ? "disabled" : ""}>待同步</button>
-          <button class="filter-chip ${state.threadFilter === "archived" ? "active" : ""}" data-filter="archived" ${state.busy ? "disabled" : ""}>仅归档</button>
-          <button class="filter-chip ${state.threadFilter === "missing" ? "active" : ""}" data-filter="missing" ${state.busy ? "disabled" : ""}>数据缺失</button>
-          <button class="filter-chip ${state.threadFilter === "selected" ? "active" : ""}" data-filter="selected" ${state.busy ? "disabled" : ""}>已选择</button>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>选择</th>
+                <th>标题</th>
+                <th>数据库 Provider</th>
+                <th>模型</th>
+                <th>JSONL Provider</th>
+                <th>状态</th>
+                <th>更新时间</th>
+                <th>CWD</th>
+                <th>会话 ID</th>
+              </tr>
+            </thead>
+            <tbody>${renderThreadRows(state)}</tbody>
+          </table>
         </div>
-        <div class="kbd-hint">键盘支持：↑/↓ 切换会话，Enter 查看详情，Space 勾选/取消。</div>
-      </div>
 
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>选择</th><th>标题</th><th>数据库 Provider</th><th>模型</th><th>JSONL Provider</th><th>状态</th><th>更新时间</th><th>CWD</th><th>会话 ID</th>
-            </tr>
-          </thead>
-          <tbody>${renderThreadRows(state)}</tbody>
-        </table>
-      </div>
-
-      <section class="thread-detail">
-        <h3>会话详情</h3>
-        <div data-bind="thread-detail-body">${renderThreadDetails(state.activeThread)}</div>
+        <section class="thread-detail">
+          <h3>会话详情</h3>
+          <div data-bind="thread-detail-body">${renderThreadDetails(state.activeThread)}</div>
+        </section>
       </section>
     </section>
   `;
@@ -200,95 +336,141 @@ function renderCodexPanel(state: WorkbenchViewState): string {
 
 function renderOperationsPanel(state: WorkbenchViewState): string {
   const codex = state.codexStatus;
+  const panels = resolvePanels(state);
+  const visibleLogCount = state.logsExpanded ? state.logs.length : Math.min(state.logs.length, 3);
   const cursorPreview = state.cursorPlan
-    ? `会话数=${state.cursorPlan.summary.threadCount}，SQLite 更新=${state.cursorPlan.summary.sqliteUpdates}，JSONL 更新=${state.cursorPlan.summary.jsonlUpdates}`
+    ? `会话数 ${state.cursorPlan.summary.threadCount}，SQLite 更新 ${state.cursorPlan.summary.sqliteUpdates}，JSONL 更新 ${state.cursorPlan.summary.jsonlUpdates}`
     : "暂无预览结果。";
   const cursorResult = state.cursorResult
-    ? `已更新会话=${state.cursorResult.summary.updatedThreads}，JSONL=${state.cursorResult.summary.updatedJsonlFiles}，备份=${state.cursorResult.backupPath}`
+    ? `已更新会话 ${state.cursorResult.summary.updatedThreads}，JSONL ${state.cursorResult.summary.updatedJsonlFiles}，备份 ${state.cursorResult.backupPath}`
     : "暂无修复结果。";
 
+  const backupBody = `
+    <select data-backup ${state.busy ? "disabled" : ""}>${renderBackups(state)}</select>
+    <div class="toolbar">
+      <button class="btn-soft" data-id="create-backup" data-requires-risk ${state.busy ? "disabled" : ""}>创建备份</button>
+      <button class="btn-warning danger-outline" data-id="restore-selected" data-requires-risk ${state.busy ? "disabled" : ""}>恢复选中备份</button>
+      <button class="btn-warning danger-outline" data-id="restore-latest" data-requires-risk ${state.busy ? "disabled" : ""}>恢复最新备份</button>
+      <button class="btn-soft" data-id="open-backups" ${state.busy ? "disabled" : ""}>打开备份目录</button>
+      <button class="btn-soft" data-id="open-deleted" ${state.busy ? "disabled" : ""}>打开删除目录</button>
+    </div>
+  `;
+
+  const snapshotBody = `
+    <div class="meta-line"><span>Provider</span><strong>${escapeHtml(codex?.currentProvider ?? "-")}</strong></div>
+    <div class="meta-line"><span>模型</span><strong>${escapeHtml(codex?.currentModel ?? "-")}</strong></div>
+    <div class="stats-grid">
+      <div>
+        <div class="muted">Provider 分布</div>
+        <ul class="compact-list">${renderDistribution(codex?.providerCounts ?? [])}</ul>
+      </div>
+      <div>
+        <div class="muted">模型分布</div>
+        <ul class="compact-list">${renderDistribution(codex?.modelCounts ?? [])}</ul>
+      </div>
+    </div>
+  `;
+
+  const cursorBody = `
+    <select data-cursor ${state.busy ? "disabled" : ""}>${renderCursorOptions(state.cursorCandidates, state.cursorCandidateId)}</select>
+    <div class="cursor-steps">${renderCursorStepLane(state.cursorStage)}</div>
+    <div class="toolbar">
+      <button class="btn-soft" data-id="cursor-diagnose" ${state.busy || !state.cursorCandidateId ? "disabled" : ""}>运行诊断</button>
+      <button class="btn-soft" data-id="cursor-preview" ${state.busy || !state.cursorCandidateId ? "disabled" : ""}>生成预览</button>
+      <button class="btn-primary danger-outline" data-id="cursor-repair" data-requires-risk ${state.busy || !state.cursorPlan ? "disabled" : ""}>执行修复</button>
+      <button class="btn-warning danger-outline" data-id="cursor-restore" data-requires-risk ${state.busy || !state.cursorCandidateId ? "disabled" : ""}>恢复最新备份</button>
+      <button class="btn-soft" data-id="cursor-open-backups" ${state.busy || !state.cursorCandidateId ? "disabled" : ""}>打开备份目录</button>
+    </div>
+    <div class="cards stacked">
+      <section class="mini-card"><h4>诊断</h4>${renderCursorIssues(state)}</section>
+      <section class="mini-card"><h4>预览</h4><p>${escapeHtml(cursorPreview)}</p></section>
+      <section class="mini-card"><h4>结果</h4><p>${escapeHtml(cursorResult)}</p></section>
+    </div>
+  `;
+
+  const logsBody = `
+    <div class="meta-line"><span>当前显示</span><strong data-bind="log-visible-count">${visibleLogCount}</strong></div>
+    <div class="log-box">${renderLogsRows(state)}</div>
+    <input type="checkbox" data-logs-expanded ${state.logsExpanded ? "checked" : ""} hidden />
+    <button
+      type="button"
+      class="btn-soft"
+      data-id="toggle-logs-expanded"
+      data-expand-label="展开全部日志"
+      data-collapse-label="收起日志"
+      aria-expanded="${state.logsExpanded ? "true" : "false"}"
+      ${state.busy ? "disabled" : ""}
+    >${state.logsExpanded ? "收起日志" : "展开全部日志"}</button>
+  `;
+
   return `
-    <aside class="panel">
-      <h2>操作台</h2>
+    <aside class="panel operations-panel">
+      <h2>操作面板</h2>
       <div class="cards">
-        <section class="card">
-          <h3>备份工作台</h3>
-          <select data-backup ${state.busy ? "disabled" : ""}>${renderBackups(state)}</select>
-          <div class="toolbar">
-            <button class="btn-soft" data-id="create-backup" ${state.busy ? "disabled" : ""}>创建备份</button>
-            <button class="btn-warning danger-outline" data-id="restore-selected" ${state.busy ? "disabled" : ""}>恢复选中备份</button>
-            <button class="btn-warning danger-outline" data-id="restore-latest" ${state.busy ? "disabled" : ""}>恢复最新备份</button>
-            <button class="btn-soft" data-id="open-backups" ${state.busy ? "disabled" : ""}>打开备份目录</button>
-            <button class="btn-soft" data-id="open-deleted" ${state.busy ? "disabled" : ""}>打开删除目录</button>
-          </div>
-        </section>
-
-        <section class="card">
-          <h3>删除预览摘要</h3>
-          ${renderDeletePreview(state)}
-        </section>
-
-        <section class="card">
-          <h3>上下文快照</h3>
-          <div class="meta-line"><span>Provider</span><strong>${escapeHtml(codex?.currentProvider ?? "-")}</strong></div>
-          <div class="meta-line"><span>模型</span><strong>${escapeHtml(codex?.currentModel ?? "-")}</strong></div>
-          <div class="stats-grid">
-            <div>
-              <div class="muted">Provider 分布</div>
-              <ul class="compact-list">${renderDistribution(codex?.providerCounts ?? [])}</ul>
-            </div>
-            <div>
-              <div class="muted">模型分布</div>
-              <ul class="compact-list">${renderDistribution(codex?.modelCounts ?? [])}</ul>
-            </div>
-          </div>
-        </section>
-
-        <section class="card">
-          <h3>Cursor 修复通道</h3>
-          <select data-cursor ${state.busy ? "disabled" : ""}>${renderCursorOptions(state.cursorCandidates, state.cursorCandidateId)}</select>
-          <div class="cursor-steps">${renderCursorStepLane(state.cursorStage)}</div>
-          <div class="toolbar">
-            <button class="btn-soft" data-id="cursor-diagnose" ${state.busy || !state.cursorCandidateId ? "disabled" : ""}>运行诊断</button>
-            <button class="btn-soft" data-id="cursor-preview" ${state.busy || !state.cursorCandidateId ? "disabled" : ""}>生成预览</button>
-            <button class="btn-primary danger-outline" data-id="cursor-repair" ${state.busy || !state.cursorPlan ? "disabled" : ""}>执行修复</button>
-            <button class="btn-warning danger-outline" data-id="cursor-restore" ${state.busy || !state.cursorCandidateId ? "disabled" : ""}>恢复最新备份</button>
-            <button class="btn-soft" data-id="cursor-open-backups" ${state.busy || !state.cursorCandidateId ? "disabled" : ""}>打开备份目录</button>
-          </div>
-          <div class="cards">
-            <section class="card"><h3>诊断</h3>${renderCursorIssues(state)}</section>
-            <section class="card"><h3>预览</h3><p>${escapeHtml(cursorPreview)}</p></section>
-            <section class="card"><h3>结果</h3><p>${escapeHtml(cursorResult)}</p></section>
-          </div>
-        </section>
-
-        <section class="card">
-          <h3>操作日志</h3>
-          <div class="log-box">${renderLogs(state.logs)}</div>
-        </section>
+        ${renderPanelCard("backup", "备份工作台", panels.backup, backupBody, state)}
+        ${renderPanelCard("deletePreview", "删除预览摘要", panels.deletePreview, renderDeletePreview(state), state)}
+        ${renderPanelCard("snapshot", "上下文快照", panels.snapshot, snapshotBody, state)}
+        ${renderPanelCard("cursor", "Cursor 修复通道", panels.cursor, cursorBody, state)}
+        ${renderPanelCard("logs", "操作日志", panels.logs, logsBody, state)}
       </div>
     </aside>
   `;
 }
 
-function renderStatusStrip(state: WorkbenchViewState): string {
-  const codex = state.codexStatus;
-  const total = codex?.threads.length ?? 0;
+function renderControlStrip(state: WorkbenchViewState): string {
+  const total = state.codexStatus?.threads.length ?? 0;
   const selected = state.selectedThreadIds.size;
   const stage = cursorStepList(state.cursorStage).find((step) => step.state === "current")?.label ?? "扫描";
+  const checklist = state.riskChecklist;
+  const riskDone = state.riskAck && checklist.appsClosed && checklist.backupReady;
   return `
-    <div class="status-strip">
-      <div class="status-item"><span>运行状态</span><strong>${state.busy ? "执行中" : "空闲"}</strong></div>
-      <div class="status-item"><span>风险确认</span><strong>${state.riskAck ? "已确认" : "未确认"}</strong></div>
-      <div class="status-item"><span>会话选择</span><strong data-bind="status-selected">${selected} / ${total}</strong></div>
-      <div class="status-item"><span>Cursor 阶段</span><strong>${escapeHtml(stage)}</strong></div>
+    <div class="control-strip" style="margin-top:6px;gap:6px;grid-template-columns:1fr 1fr 1fr minmax(180px,1fr);">
+      <div class="status-item" style="display:flex;align-items:center;justify-content:space-between;padding:4px 7px;">
+        <span>阶段</span>
+        <strong>${escapeHtml(stage)}</strong>
+      </div>
+      <div class="status-item" style="display:flex;align-items:center;justify-content:space-between;padding:4px 7px;">
+        <span>选中</span>
+        <strong data-bind="status-selected">${selected} / ${total}</strong>
+      </div>
+      <div class="status-item" style="display:flex;align-items:center;justify-content:space-between;padding:4px 7px;">
+        <span>风控</span>
+        <strong data-bind="risk-status">${riskDone ? "已确认" : "未确认"}</strong>
+      </div>
+      <div class="status-item density-control" style="padding:4px 7px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+          <span>密度</span>
+          <div class="density-actions" style="grid-template-columns:auto auto;">
+            <select data-density hidden aria-hidden="true" ${state.busy ? "disabled" : ""}>
+              <option value="compact" ${state.densityMode === "compact" ? "selected" : ""}>紧凑</option>
+              <option value="standard" ${state.densityMode === "standard" ? "selected" : ""}>标准</option>
+            </select>
+            <button
+              class="btn-soft btn-mini"
+              data-density-mode="compact"
+              data-active="${state.densityMode === "compact" ? "1" : "0"}"
+              ${state.busy ? "disabled" : ""}
+            >紧凑</button>
+            <button
+              class="btn-soft btn-mini"
+              data-density-mode="standard"
+              data-active="${state.densityMode === "standard" ? "1" : "0"}"
+              ${state.busy ? "disabled" : ""}
+            >标准</button>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 }
 
 export function renderWorkbench(state: WorkbenchViewState): string {
   return `
-    <div class="workbench">
+    <div
+      class="workbench density-${escapeHtml(state.densityMode)}"
+      data-density="${escapeHtml(state.densityMode)}"
+      data-busy="${state.busy ? "1" : "0"}"
+    >
       <div class="app-shell">
         <header class="chrome-bar">
           <div class="chrome-left">
@@ -299,14 +481,16 @@ export function renderWorkbench(state: WorkbenchViewState): string {
           <div class="chrome-title">Codex Recovery Studio</div>
           <div class="chrome-right">
             <span class="chrome-pill">本地模式</span>
-            <span class="chrome-pill">${state.busy ? "任务执行中" : "就绪"}</span>
+            <span class="chrome-pill" data-bind="chrome-busy">${state.busy ? "任务执行中" : "就绪"}</span>
           </div>
         </header>
 
         <header class="topbar">
-          <h1>会话修复工作台</h1>
-          <p>聚焦 Codex 会话修复、备份回滚与 Cursor 元数据修复。</p>
-          ${renderStatusStrip(state)}
+          <div class="section-head" style="align-items:center;">
+            <h1 style="margin:0;">会话修复工作台</h1>
+            <span style="font-size:10px;color:rgba(237,246,255,0.9);">Codex + Cursor 本地恢复</span>
+          </div>
+          ${renderControlStrip(state)}
         </header>
 
         <div class="layout">
@@ -314,8 +498,8 @@ export function renderWorkbench(state: WorkbenchViewState): string {
           ${renderOperationsPanel(state)}
         </div>
 
-        ${state.busy ? `<div class="banner banner-busy">任务执行中...</div>` : ""}
-        ${state.error ? `<div class="banner banner-error">${escapeHtml(state.error)}</div>` : ""}
+        <div class="banner banner-busy" data-bind="busy-banner" ${state.busy ? "" : "hidden"}>任务执行中...</div>
+        <div class="banner banner-error" data-bind="error-banner" ${state.error ? "" : "hidden"}>${escapeHtml(state.error)}</div>
       </div>
     </div>
   `;

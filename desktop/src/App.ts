@@ -13,10 +13,12 @@ import { normalizeText, nowText } from "./ui/workbench-utils.ts";
 import type {
   CursorStage,
   LogLevel,
+  RiskChecklistState,
   SortDirection,
   ThreadFilter,
   ThreadSort,
   UiLog,
+  WorkbenchPanelState,
   WorkbenchViewState
 } from "./ui/workbench-types.ts";
 
@@ -29,6 +31,18 @@ export class RestoreAppView {
 
   private riskAck = false;
   private patchJsonl = true;
+  private logsExpanded = false;
+  private operationPanels: WorkbenchPanelState = {
+    backup: true,
+    deletePreview: false,
+    snapshot: false,
+    cursor: true,
+    logs: false
+  };
+  private riskChecklist: RiskChecklistState = {
+    appsClosed: false,
+    backupReady: false
+  };
 
   private codexStatus: CodexStatusReport | null = null;
   private selectedThreadIds = new Set<string>();
@@ -86,9 +100,9 @@ export class RestoreAppView {
   }
 
   private async refreshAll(): Promise<void> {
-    this.busy = true;
     this.error = "";
-    this.render();
+    this.patchErrorUi();
+    this.setBusy(true);
     try {
       const [status, envs] = await Promise.all([
         window.restoreApp.codexStatus({ candidateId: this.codexStatus?.candidateId }),
@@ -103,8 +117,9 @@ export class RestoreAppView {
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
       this.pushLog("error", `刷新失败：${this.error}`);
+      this.patchErrorUi();
     } finally {
-      this.busy = false;
+      this.setBusy(false);
       this.render();
     }
   }
@@ -115,7 +130,7 @@ export class RestoreAppView {
   }
 
   private requireRisk(action: string): boolean {
-    if (this.riskAck) return true;
+    if (this.isRiskReady()) return true;
     this.error = `${action}：请先勾选风险确认。`;
     this.pushLog("warning", `${action}已拦截（未确认风险）。`);
     this.render();
@@ -127,16 +142,17 @@ export class RestoreAppView {
   }
 
   private async withBusy(task: () => Promise<void>): Promise<void> {
-    this.busy = true;
     this.error = "";
-    this.render();
+    this.patchErrorUi();
+    this.setBusy(true);
     try {
       await task();
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
       this.pushLog("error", this.error);
+      this.patchErrorUi();
     } finally {
-      this.busy = false;
+      this.setBusy(false);
       this.render();
     }
   }
@@ -228,6 +244,245 @@ export class RestoreAppView {
     if (kpiSelected) kpiSelected.textContent = String(selected);
     const statusSelected = this.root.querySelector<HTMLElement>('[data-bind="status-selected"]');
     if (statusSelected) statusSelected.textContent = `${selected} / ${total}`;
+  }
+
+  private hasRiskChecklistInputs(): boolean {
+    return (
+      this.root.querySelector("[data-risk-apps-closed]") !== null ||
+      this.root.querySelector("[data-risk-backup-ready]") !== null
+    );
+  }
+
+  private isRiskChecklistReady(): boolean {
+    if (!this.hasRiskChecklistInputs()) return true;
+    return this.riskChecklist.appsClosed && this.riskChecklist.backupReady;
+  }
+
+  private isRiskReady(): boolean {
+    return this.riskAck && this.isRiskChecklistReady();
+  }
+
+  private getFallbackPanelElement(panel: keyof WorkbenchPanelState): HTMLElement | null {
+    const cards = this.root.querySelectorAll<HTMLElement>("aside.panel .cards > .card");
+    if (cards.length === 0) return null;
+    const indexMap: Record<keyof WorkbenchPanelState, number> = {
+      backup: 0,
+      deletePreview: 1,
+      snapshot: 2,
+      cursor: 3,
+      logs: 4
+    };
+    return cards[indexMap[panel]] ?? null;
+  }
+
+  private patchOperationPanelsUi(panel?: keyof WorkbenchPanelState): boolean {
+    const keys = panel ? [panel] : (Object.keys(this.operationPanels) as (keyof WorkbenchPanelState)[]);
+    let patched = false;
+
+    for (const key of keys) {
+      const expanded = this.operationPanels[key];
+      const scopedPanels = this.root.querySelectorAll<HTMLElement>(`.operations-panel [data-panel="${key}"]`);
+      const targetPanels =
+        scopedPanels.length > 0 ? scopedPanels : this.root.querySelectorAll<HTMLElement>(`[data-panel="${key}"]`);
+      if (targetPanels.length > 0) {
+        targetPanels.forEach((target) => {
+          target.hidden = !expanded;
+          target.setAttribute("data-collapsed", expanded ? "0" : "1");
+        });
+        patched = true;
+      } else {
+        const fallback = this.getFallbackPanelElement(key);
+        if (fallback) {
+          fallback.hidden = !expanded;
+          fallback.setAttribute("data-collapsed", expanded ? "0" : "1");
+          patched = true;
+        }
+      }
+
+      const scopedToggles = this.root.querySelectorAll<HTMLElement>(`.operations-panel [data-toggle-panel="${key}"]`);
+      const toggles =
+        scopedToggles.length > 0
+          ? scopedToggles
+          : this.root.querySelectorAll<HTMLElement>(`[data-toggle-panel="${key}"]`);
+      toggles.forEach((toggle) => {
+        toggle.setAttribute("aria-expanded", String(expanded));
+        toggle.setAttribute("data-open", expanded ? "1" : "0");
+        if (toggle instanceof HTMLButtonElement) {
+          toggle.textContent = expanded ? "收起" : "展开";
+        }
+        patched = true;
+      });
+    }
+
+    return patched;
+  }
+
+  private patchLogsUi(): boolean {
+    let patched = false;
+
+    const scopedRows = this.root.querySelectorAll<HTMLElement>(".operations-panel .log-box .log-row, .operations-panel [data-log-row]");
+    const rows =
+      scopedRows.length > 0 ? scopedRows : this.root.querySelectorAll<HTMLElement>(".log-box .log-row, [data-log-row]");
+    if (rows.length > 0) {
+      rows.forEach((row, index) => {
+        row.hidden = !this.logsExpanded && index >= 3;
+      });
+      patched = true;
+    }
+
+    this.getLogsToggleControls().forEach((toggle) => {
+      toggle.setAttribute("aria-expanded", String(this.logsExpanded));
+      const expandLabel = toggle.dataset.expandLabel;
+      const collapseLabel = toggle.dataset.collapseLabel;
+      if (toggle instanceof HTMLButtonElement && (expandLabel || collapseLabel)) {
+        toggle.textContent = this.logsExpanded
+          ? collapseLabel ?? "收起日志"
+          : expandLabel ?? "展开日志";
+      }
+      patched = true;
+    });
+
+    const visibleCounter = this.root.querySelector<HTMLElement>('[data-bind="log-visible-count"]');
+    if (visibleCounter) {
+      visibleCounter.textContent = this.logsExpanded
+        ? String(this.logs.length)
+        : String(Math.min(this.logs.length, 3));
+      patched = true;
+    }
+
+    return patched;
+  }
+
+  private patchRiskUi(): boolean {
+    let patched = false;
+
+    const risk = this.root.querySelector<HTMLInputElement>("[data-risk]");
+    if (risk) {
+      risk.checked = this.riskAck;
+      risk.disabled = this.busy;
+      patched = true;
+    }
+
+    const appsClosed = this.root.querySelector<HTMLInputElement>("[data-risk-apps-closed]");
+    if (appsClosed) {
+      appsClosed.checked = this.riskChecklist.appsClosed;
+      appsClosed.disabled = this.busy;
+      patched = true;
+    }
+
+    const backupReady = this.root.querySelector<HTMLInputElement>("[data-risk-backup-ready]");
+    if (backupReady) {
+      backupReady.checked = this.riskChecklist.backupReady;
+      backupReady.disabled = this.busy;
+      patched = true;
+    }
+
+    this.root.querySelectorAll<HTMLElement>('[data-bind="risk-status"]').forEach((riskStatus) => {
+      riskStatus.textContent = this.isRiskReady() ? "已确认" : "未确认";
+      patched = true;
+    });
+
+    this.root.querySelectorAll<HTMLButtonElement>("[data-requires-risk]").forEach((button) => {
+      button.disabled = this.busy || !this.isRiskReady();
+      patched = true;
+    });
+
+    return patched;
+  }
+
+  private patchBusyUi(): boolean {
+    let patched = false;
+
+    const workbench = this.root.querySelector<HTMLElement>(".workbench");
+    if (workbench) {
+      workbench.setAttribute("data-busy", this.busy ? "1" : "0");
+      patched = true;
+    }
+
+    const busyBanner = this.root.querySelector<HTMLElement>('[data-bind="busy-banner"]');
+    if (busyBanner) {
+      busyBanner.hidden = !this.busy;
+      patched = true;
+    }
+
+    const chromeBusy = this.root.querySelector<HTMLElement>('[data-bind="chrome-busy"]');
+    if (chromeBusy) {
+      chromeBusy.textContent = this.busy ? "任务执行中" : "就绪";
+      patched = true;
+    }
+
+    return patched;
+  }
+
+  private patchErrorUi(): boolean {
+    const errorBanner = this.root.querySelector<HTMLElement>('[data-bind="error-banner"]');
+    if (!errorBanner) return false;
+    errorBanner.hidden = !this.error;
+    errorBanner.textContent = this.error;
+    return true;
+  }
+
+  private setBusy(next: boolean): void {
+    if (this.busy === next) return;
+    this.busy = next;
+    if (this.patchBusyUi()) {
+      this.patchRiskUi();
+      this.patchPatchJsonlUi();
+      this.patchBackupSelectUi();
+      return;
+    }
+    this.render();
+  }
+
+  private patchPatchJsonlUi(): boolean {
+    const patch = this.root.querySelector<HTMLInputElement>("[data-patch-jsonl]");
+    if (!patch) return false;
+    patch.checked = this.patchJsonl;
+    patch.disabled = this.busy;
+    return true;
+  }
+
+  private patchBackupSelectUi(): boolean {
+    const backup = this.root.querySelector<HTMLSelectElement>("[data-backup]");
+    if (!backup) return false;
+    if (backup.value !== this.selectedBackupPath) {
+      backup.value = this.selectedBackupPath;
+    }
+    backup.disabled = this.busy;
+    return true;
+  }
+
+  private getLogsToggleControls(): HTMLElement[] {
+    const currentControls = this.root.querySelectorAll<HTMLElement>('[data-id="toggle-logs-expanded"]');
+    if (currentControls.length > 0) return Array.from(currentControls);
+    return Array.from(this.root.querySelectorAll<HTMLElement>('[data-id="toggle-logs"]'));
+  }
+
+  private toggleOperationPanel(panel: keyof WorkbenchPanelState): void {
+    this.operationPanels = { ...this.operationPanels, [panel]: !this.operationPanels[panel] };
+    if (!this.patchOperationPanelsUi(panel)) this.render();
+  }
+
+  private setLogsExpanded(expanded: boolean): void {
+    if (expanded === this.logsExpanded) return;
+    this.logsExpanded = expanded;
+    if (!this.patchLogsUi()) this.render();
+  }
+
+  private setRiskChecklistItem(key: keyof RiskChecklistState, checked: boolean): void {
+    if (this.riskChecklist[key] === checked) return;
+    this.riskChecklist = { ...this.riskChecklist, [key]: checked };
+    if (!this.patchRiskUi()) this.render();
+  }
+
+  private patchUiAfterRender(): void {
+    this.patchBusyUi();
+    this.patchErrorUi();
+    this.patchOperationPanelsUi();
+    this.patchLogsUi();
+    this.patchRiskUi();
+    this.patchPatchJsonlUi();
+    this.patchBackupSelectUi();
   }
 
   private patchActiveThreadUi(): boolean {
@@ -602,20 +857,62 @@ export class RestoreAppView {
     const risk = this.root.querySelector<HTMLInputElement>("[data-risk]");
     risk?.addEventListener("change", () => {
       this.riskAck = !!risk.checked;
-      this.render();
+      if (!this.patchRiskUi()) this.render();
+    });
+
+    const riskAppsClosed = this.root.querySelector<HTMLInputElement>("[data-risk-apps-closed]");
+    riskAppsClosed?.addEventListener("change", () => {
+      this.setRiskChecklistItem("appsClosed", !!riskAppsClosed.checked);
+    });
+
+    const riskBackupReady = this.root.querySelector<HTMLInputElement>("[data-risk-backup-ready]");
+    riskBackupReady?.addEventListener("change", () => {
+      this.setRiskChecklistItem("backupReady", !!riskBackupReady.checked);
     });
 
     const patch = this.root.querySelector<HTMLInputElement>("[data-patch-jsonl]");
     patch?.addEventListener("change", () => {
       this.patchJsonl = !!patch.checked;
-      this.render();
+      if (!this.patchPatchJsonlUi()) this.render();
     });
 
     const backup = this.root.querySelector<HTMLSelectElement>("[data-backup]");
     backup?.addEventListener("change", () => {
       this.selectedBackupPath = backup.value;
-      this.render();
+      this.patchBackupSelectUi();
     });
+
+    const scopedPanelToggles = this.root.querySelectorAll<HTMLElement>(".operations-panel [data-toggle-panel]");
+    const panelToggles =
+      scopedPanelToggles.length > 0 ? scopedPanelToggles : this.root.querySelectorAll<HTMLElement>("[data-toggle-panel]");
+    panelToggles.forEach((control) => {
+      control.addEventListener("click", () => {
+        const panel = control.dataset.togglePanel;
+        if (
+          panel === "backup" ||
+          panel === "deletePreview" ||
+          panel === "snapshot" ||
+          panel === "cursor" ||
+          panel === "logs"
+        ) {
+          this.toggleOperationPanel(panel);
+        }
+      });
+    });
+
+    const logsToggleControls = this.getLogsToggleControls();
+    logsToggleControls.forEach((control) => {
+      control.addEventListener("click", () => {
+        this.setLogsExpanded(!this.logsExpanded);
+      });
+    });
+
+    const logsExpandedSwitch = this.root.querySelector<HTMLInputElement>("[data-logs-expanded]");
+    if (logsToggleControls.length === 0) {
+      logsExpandedSwitch?.addEventListener("change", () => {
+        this.setLogsExpanded(!!logsExpandedSwitch.checked);
+      });
+    }
 
     const cursor = this.root.querySelector<HTMLSelectElement>("[data-cursor]");
     cursor?.addEventListener("change", () => {
@@ -655,7 +952,9 @@ export class RestoreAppView {
       busy: this.busy,
       error: this.error,
       logs: this.logs,
+      logsExpanded: this.logsExpanded,
       riskAck: this.riskAck,
+      riskChecklist: this.riskChecklist,
       patchJsonl: this.patchJsonl,
       codexStatus: this.codexStatus,
       filteredThreads: this.getFilteredThreads(),
@@ -673,12 +972,22 @@ export class RestoreAppView {
       cursorReport: this.cursorReport,
       cursorPlan: this.cursorPlan,
       cursorResult: this.cursorResult,
-      lastDeletePreview: this.lastDeletePreview
+      lastDeletePreview: this.lastDeletePreview,
+      operationPanels: this.operationPanels
     };
 
     ensureWorkbenchStyle();
-    this.root.innerHTML = renderWorkbench(viewState);
+    const markup = renderWorkbench(viewState);
+    const template = document.createElement("template");
+    template.innerHTML = markup.trim();
+    const nextRoot = template.content.firstElementChild;
+    if (nextRoot) {
+      this.root.replaceChildren(nextRoot);
+    } else {
+      this.root.innerHTML = markup;
+    }
     this.prepareKeyboardAccessibility();
     this.bindEvents();
+    this.patchUiAfterRender();
   }
 }

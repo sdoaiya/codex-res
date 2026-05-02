@@ -14,6 +14,19 @@ export type ThreadFilter = "all" | "need-sync" | "archived" | "missing" | "selec
 export type ThreadSort = "updated" | "title" | "provider";
 export type SortDirection = "asc" | "desc";
 
+export interface WorkbenchPanelState {
+  backup: boolean;
+  deletePreview: boolean;
+  snapshot: boolean;
+  cursor: boolean;
+  logs: boolean;
+}
+
+export interface RiskChecklistState {
+  appsClosed: boolean;
+  backupReady: boolean;
+}
+
 export interface UiLog {
   id: number;
   time: string;
@@ -44,4 +57,7 @@ export interface WorkbenchViewState {
   cursorPlan: RepairPlan | null;
   cursorResult: RepairResult | null;
   lastDeletePreview: CodexDeleteResult | null;
+  logsExpanded: boolean;
+  operationPanels: WorkbenchPanelState;
+  riskChecklist: RiskChecklistState;
 }

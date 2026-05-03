@@ -473,18 +473,13 @@ export function renderWorkbench(state: WorkbenchViewState): string {
   return `
     <div class="workbench" data-busy="${state.busy ? "1" : "0"}">
       <div class="app-shell">
-        <header class="chrome-bar">
-          <div class="chrome-title">Codex Recovery Studio</div>
-          <div class="chrome-right">
-            <span class="chrome-pill">本地模式</span>
-            <span class="chrome-pill" data-bind="chrome-busy">${state.busy ? "任务执行中" : "就绪"}</span>
-          </div>
-        </header>
-
         <header class="topbar">
           <div class="section-head">
             <h1>会话修复工作台</h1>
-            <span class="topbar-tag">Codex + Cursor 本地恢复</span>
+            <div class="toolbar">
+              <span class="topbar-tag">Codex + Cursor 本地恢复</span>
+              <span class="topbar-tag" data-bind="chrome-busy">${state.busy ? "任务执行中" : "就绪"}</span>
+            </div>
           </div>
           ${renderControlStrip(state)}
         </header>

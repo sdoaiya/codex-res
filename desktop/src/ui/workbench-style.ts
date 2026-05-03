@@ -73,7 +73,7 @@ export const WORKBENCH_STYLE = `
     background: linear-gradient(180deg, var(--bg-shell-top), var(--bg-shell-bottom));
     box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
     display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
     gap: 7px;
     padding: var(--s2);
     overflow: hidden;
@@ -83,9 +83,10 @@ export const WORKBENCH_STYLE = `
     cursor: progress;
   }
 
-  .workbench[data-busy="1"] .chrome-bar,
-  .workbench[data-busy="1"] .topbar,
-  .workbench[data-busy="1"] .layout {
+  .workbench[data-busy="1"] button,
+  .workbench[data-busy="1"] select,
+  .workbench[data-busy="1"] input,
+  .workbench[data-busy="1"] [data-row-id] {
     pointer-events: none;
   }
 
@@ -289,6 +290,8 @@ export const WORKBENCH_STYLE = `
 
   .panel > .card.section-block {
     order: 5;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .panel > .action-grid.section-block > .card:first-child {
@@ -423,9 +426,21 @@ export const WORKBENCH_STYLE = `
   .thread-controls {
     margin-top: var(--s1);
     display: grid;
-    grid-template-columns: 1fr 152px auto;
+    grid-template-columns: minmax(0, 1fr) minmax(118px, 152px) minmax(98px, max-content);
     gap: 5px;
     align-items: center;
+    min-width: 0;
+  }
+
+  .thread-controls > * {
+    min-width: 0;
+  }
+
+  .thread-controls [data-id="toggle-sort-direction"] {
+    justify-self: stretch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .filter-row {
@@ -433,6 +448,15 @@ export const WORKBENCH_STYLE = `
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-gutter: stable;
+    padding-bottom: 1px;
+  }
+
+  .filter-row .filter-chip {
+    flex: 0 0 auto;
   }
 
   .table-wrap {
@@ -440,12 +464,17 @@ export const WORKBENCH_STYLE = `
     border: 1px solid var(--line);
     border-radius: var(--r-sm);
     background: #101722;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     overflow-x: auto;
-    overflow-y: visible;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    max-height: clamp(170px, 34vh, 360px);
   }
 
   table {
-    width: 100%;
+    width: max(100%, 780px);
     border-collapse: collapse;
     font-size: 11px;
   }
@@ -511,6 +540,9 @@ export const WORKBENCH_STYLE = `
     border-radius: var(--r-sm);
     background: #121925;
     padding: var(--s2);
+    min-width: 0;
+    overflow: auto;
+    max-height: clamp(110px, 24vh, 240px);
   }
 
   .thread-detail h3 {
@@ -533,6 +565,7 @@ export const WORKBENCH_STYLE = `
     padding: 6px 7px;
     display: grid;
     gap: 2px;
+    min-width: 0;
   }
 
   .thread-meta-grid span {
@@ -544,6 +577,9 @@ export const WORKBENCH_STYLE = `
     color: #e8eef8;
     font-size: 11px;
     font-weight: 610;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .thread-meta-grid .wide {
@@ -1135,8 +1171,12 @@ export const WORKBENCH_STYLE = `
     }
 
     .thread-controls {
-      grid-template-columns: 1fr 120px auto;
+      grid-template-columns: minmax(0, 1fr) minmax(108px, 120px) minmax(94px, 106px);
       gap: 4px;
+    }
+
+    .table-wrap {
+      max-height: clamp(158px, 30vh, 280px);
     }
 
     th,
@@ -1164,6 +1204,23 @@ export const WORKBENCH_STYLE = `
 
     .thread-controls {
       grid-template-columns: 1fr;
+    }
+
+    table th:nth-child(8),
+    table td:nth-child(8),
+    table th:nth-child(9),
+    table td:nth-child(9) {
+      display: none;
+    }
+
+    .thread-meta-grid strong.mono {
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .table-wrap {
+      max-height: clamp(152px, 28vh, 240px);
     }
   }
 
@@ -1200,6 +1257,15 @@ export const WORKBENCH_STYLE = `
       grid-template-columns: 1fr;
     }
 
+    .table-wrap {
+      max-height: clamp(140px, 26vh, 210px);
+    }
+
+    table th:nth-child(5),
+    table td:nth-child(5) {
+      display: none;
+    }
+
     .log-row {
       grid-template-columns: 1fr;
       gap: 3px;
@@ -1207,6 +1273,14 @@ export const WORKBENCH_STYLE = `
   }
 
   @media (max-width: 800px), (max-height: 600px) {
+    table {
+      width: max(100%, 620px);
+    }
+
+    .table-wrap {
+      max-height: clamp(126px, 24vh, 180px);
+    }
+
     table th:nth-child(4),
     table td:nth-child(4),
     table th:nth-child(5),

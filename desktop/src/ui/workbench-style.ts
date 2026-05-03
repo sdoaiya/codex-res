@@ -260,6 +260,15 @@ export const WORKBENCH_STYLE = `
     gap: var(--s2);
   }
 
+  .codex-head-right {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--s1);
+    min-width: 0;
+    max-width: 72%;
+  }
+
   .section-title {
     margin: var(--s2) 0 var(--s1);
     color: #8d9caf;
@@ -320,6 +329,12 @@ export const WORKBENCH_STYLE = `
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .path-line-inline {
+    margin-top: 0;
+    max-width: min(52vw, 560px);
+    text-align: right;
   }
 
   .kpis {
@@ -1202,6 +1217,15 @@ export const WORKBENCH_STYLE = `
       grid-template-columns: 1fr;
     }
 
+    .codex-head-right {
+      max-width: 100%;
+      flex: 1 1 auto;
+    }
+
+    .path-line-inline {
+      max-width: min(58vw, 440px);
+    }
+
     .thread-controls {
       grid-template-columns: 1fr;
     }
@@ -1255,6 +1279,17 @@ export const WORKBENCH_STYLE = `
 
     .stats-grid {
       grid-template-columns: 1fr;
+    }
+
+    .codex-head-right {
+      width: 100%;
+      max-width: 100%;
+      justify-content: space-between;
+    }
+
+    .path-line-inline {
+      max-width: calc(100% - 76px);
+      text-align: left;
     }
 
     .table-wrap {

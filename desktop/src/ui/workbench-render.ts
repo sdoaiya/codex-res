@@ -329,11 +329,11 @@ function renderCodexPanel(state: WorkbenchViewState): string {
     <main class="panel">
       <div class="section-head">
         <h2>Codex 会话工作台</h2>
-        <div class="toolbar">
+        <div class="codex-head-right">
+          <span class="muted path-line path-line-inline">${escapeHtml(codexHome)}</span>
           <button class="btn-soft" data-id="refresh" ${state.busy ? "disabled" : ""}>刷新</button>
         </div>
       </div>
-      <div class="muted path-line">${escapeHtml(codexHome)}</div>
 
       <div class="kpis">
         <div class="kpi"><div class="v">${totalThreads}</div><div class="k">总会话</div></div>

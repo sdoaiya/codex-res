@@ -60,10 +60,11 @@ async function resolveCodexRootPath(candidateId?: string): Promise<string> {
 
 function createWindow() {
   const window = new BrowserWindow({
-    width: 620,
-    height: 420,
-    minWidth: 560,
-    minHeight: 360,
+    width: 1440,
+    height: 800,
+    minWidth: 800,
+    minHeight: 600,
+    backgroundColor: "#0a0f15",
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
